@@ -64,18 +64,22 @@ docker compose up -d
 ---
 
 ## Структура директорий
+
+```
 /opt/smart-home/          # Docker Compose проект
-docker-compose.yml
-config/
-prometheus.yml
+  docker-compose.yml
+  config/
+    prometheus.yml
+
 /data/                    # HDD 500GB (UUID: 0d812c59-9f59-4129-9808-36abc88ad3ec)
-homeassistant/          # Конфиги Home Assistant
-mosquitto/              # Данные MQTT
-zigbee2mqtt/            # Данные Zigbee2MQTT
-esphome/                # Прошивки ESPHome
-prometheus/             # Данные Prometheus
-grafana/                # Данные Grafana
-backups/                # Резервные копии
+  homeassistant/          # Конфиги Home Assistant
+  mosquitto/              # Данные MQTT
+  zigbee2mqtt/            # Данные Zigbee2MQTT
+  esphome/                # Прошивки ESPHome
+  prometheus/             # Данные Prometheus
+  grafana/                # Данные Grafana
+  backups/                # Резервные копии
+```
 
 ---
 
@@ -160,9 +164,13 @@ git clone https://github.com/ken-sho/smart_home.git /opt/smart-home-git
 ### Шаг 6 — Восстановление конфигов
 
 ```bash
+mkdir -p /opt/smart-home/config
 cp /opt/smart-home-git/docker-compose.yml /opt/smart-home/
 cp /opt/smart-home-git/config/prometheus.yml /opt/smart-home/config/
-# Остальные конфиги восстановить из /opt/smart-home-git/config/
+cp /opt/smart-home-git/config/netplan.yaml /etc/netplan/50-cloud-init.yaml
+cp /opt/smart-home-git/config/dhcpd.conf /etc/dhcp/dhcpd.conf
+cp /opt/smart-home-git/config/ha_configuration.yaml /data/homeassistant/configuration.yaml
+cp /opt/smart-home-git/config/ha_automations.yaml /data/homeassistant/automations.yaml
 ```
 
 ### Шаг 7 — Запуск стека
@@ -180,48 +188,90 @@ docker compose up -d
 
 ```bash
 sudo apt install isc-dhcp-server -y
-# Smart Home Core
+sudo cp /opt/smart-home-git/config/dhcpd.conf /etc/dhcp/dhcpd.conf
+sudo sed -i 's/INTERFACESv4=""/INTERFACESv4="intel0"/' /etc/default/isc-dhcp-server
+sudo systemctl restart isc-dhcp-server
+```
 
-Система умного дома на базе собственного сервера Core.  
-Версия документации: **v0.4**  
-Статус: в разработке
+### Шаг 9 — AmneziaWG VPN
+
+```bash
+# Установить AmneziaWG согласно документации amnezia.org
+# Скопировать конфиг из защищённого хранилища
+sudo cp wg0.conf /etc/amnezia/amneziawg/wg0.conf
+sudo systemctl enable awg-quick@wg0
+sudo systemctl start awg-quick@wg0
+# Проверка
+curl -s --max-time 5 https://api.telegram.org && echo OK
+```
+
+### Шаг 10 — Tailscale
+
+```bash
+curl -fsSL https://tailscale.com/install.sh | sh
+tailscale up
+# Авторизоваться через браузер (gakto1981@gmail.com)
+```
+
+**После авторизации:**
+- Tailscale IP Core: `100.69.214.120`
+- Публичный URL HA (Funnel): `https://core.tail751bc9.ts.net`
+
+```bash
+# Запуск Funnel для Home Assistant
+tailscale funnel --bg 8123
+```
+
+**Доступ к сервисам:**
+
+| Сервис | URL |
+|--------|-----|
+| Home Assistant (публичный) | https://core.tail751bc9.ts.net |
+| Home Assistant (локальный) | http://192.168.10.254:8123 |
+| Grafana | http://100.69.214.120:3000 |
+| Prometheus | http://100.69.214.120:9090 |
+
+### Шаг 11 — Проверка
+
+```bash
+docker ps                                              # все контейнеры Up
+ping 192.168.11.253                                    # микротик доступен
+curl http://localhost:8123                             # Home Assistant
+curl http://localhost:3000                             # Grafana
+curl -s https://api.telegram.org && echo OK            # Telegram доступен
+tailscale status                                       # Tailscale подключён
+curl https://core.tail751bc9.ts.net && echo OK         # Funnel работает
+```
 
 ---
 
-## Железо
+## Секреты (НЕ в Git)
 
-| Компонент | Описание |
-|-----------|----------|
-| CPU | Intel Xeon X3440 (4 ядра / 8 потоков, 2.53GHz) |
-| RAM | 8 GB |
-| SSD | 60 GB — ОС + Docker |
-| HDD | 500 GB (WD Blue) — данные, примонтирован на `/data` |
-| Сетевая | Встроенная Realtek (консоль) + Intel 4-портовая PCI-E |
-| ОС | Ubuntu Server 24.04 LTS |
-| Пользователь | `shadmin` |
-| Hostname | `core` |
+Хранятся отдельно в зашифрованном виде:
+
+- AmneziaWG конфиг (`/etc/amnezia/amneziawg/wg0.conf`)
+- Telegram Bot токен
+- Tuya API credentials
+- HA Long-Lived Access Token
+- Пароли Wi-Fi сетей
+- Tailscale authkey
 
 ---
 
-## Сетевая схема
+## Устройства IoT
 
-| Интерфейс | Подсеть | Назначение |
-|-----------|---------|------------|
-| `console` (встроенная) | 192.168.10.0/24 | Прямое подключение ноутбука/консоли |
-| `intel0` | 192.168.11.0/24 | IoT сеть (hAP mini → устройства) |
-| `intel1` | 192.168.12.0/24 | Резерв |
-| `intel2` | 192.168.13.0/24 | Резерв |
-| `intel3` | 192.168.14.0/24 | Резерв |
-| `wlx...` (USB Wi-Fi) | — | Интернет через AmneziaWG VPN |
-
-**Core имеет .254 на каждом интерфейсе.**
-
-### IoT сеть
-- Точка доступа: MikroTik mAP lite (`192.168.11.253`)
-- SSID: `iot_shogo`, пароль в `.env`
-- DHCP сервер: на Core (`isc-dhcp-server`, intel0)
-- Диапазон: `192.168.11.1 — 192.168.11.200`
+| Устройство | Протокол | IP | Интеграция |
+|------------|----------|----|------------|
+| temp_sensor_2 | Wi-Fi Tuya | 192.168.11.10 | Tuya Cloud |
+| MikroTik mAP lite | Ethernet | 192.168.11.253 | — |
 
 ---
 
-## Docker стек (сервисы)
+## Changelog
+
+| Версия | Дата | Изменения |
+|--------|------|-----------|
+| v0.1 | 2026-05 | Начальная архитектура |
+| v0.2 | 2026-05 | Установка Ubuntu, Docker стек, IoT сеть |
+| v0.3 | 2026-05 | Первое устройство (Tuya датчик), Grafana дашборд, Git |
+| v0.4 | 2026-05 | Tailscale VPN, Funnel для HA, удалённый доступ |
