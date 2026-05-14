@@ -238,3 +238,38 @@ curl https://api.telegram.org && echo OK  # Telegram доступен
 | v0.1 | 2026-05 | Начальная архитектура |
 | v0.2 | 2026-05 | Установка Ubuntu, Docker стек, IoT сеть |
 | v0.3 | 2026-05 | Первое устройство (Tuya датчик), Grafana дашборд, Git |
+---
+
+### Шаг 10 — Tailscale + Funnel
+
+```bash
+# Установка
+curl -fsSL https://tailscale.com/install.sh | sh
+
+# Авторизация (откроется ссылка — войти через gakto1981@gmail.com)
+tailscale up
+
+# Запуск Funnel для Home Assistant (публичный HTTPS)
+tailscale funnel --bg 8123
+```
+
+**Результат:**
+- Tailscale IP Core: `100.69.214.120`
+- Публичный URL HA: `https://core.tail751bc9.ts.net`
+
+**Проверка:**
+```bash
+tailscale status
+curl -X GET https://core.tail751bc9.ts.net
+```
+
+**Доступ к сервисам:**
+
+| Сервис | URL |
+|--------|-----|
+| Home Assistant | https://core.tail751bc9.ts.net |
+| Grafana | http://100.69.214.120:3000 |
+| Prometheus | http://100.69.214.120:9090 |
+
+> Funnel (публичный интернет) — только для HA, нужен для Алисы.
+> Grafana и Prometheus — только внутри tailnet, без Funnel.
