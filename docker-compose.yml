@@ -1,0 +1,95 @@
+services:
+  homeassistant:
+    container_name: homeassistant
+    image: ghcr.io/home-assistant/home-assistant:stable
+    volumes:
+      - /data/homeassistant:/config
+      - /etc/localtime:/etc/localtime:ro
+    restart: unless-stopped
+    privileged: true
+    network_mode: host
+
+  mosquitto:
+    container_name: mosquitto
+    image: eclipse-mosquitto:latest
+    volumes:
+      - /data/mosquitto/config:/mosquitto/config
+      - /data/mosquitto/data:/mosquitto/data
+      - /data/mosquitto/log:/mosquitto/log
+    ports:
+      - "1883:1883"
+      - "9001:9001"
+    restart: unless-stopped
+
+  zigbee2mqtt:
+    container_name: zigbee2mqtt
+    image: koenkk/zigbee2mqtt:latest
+    volumes:
+      - /data/zigbee2mqtt:/app/data
+      - /run/udev:/run/udev:ro
+    ports:
+      - "8080:8080"
+    environment:
+      - TZ=Europe/Moscow
+    restart: unless-stopped
+    privileged: true
+
+  esphome:
+    container_name: esphome
+    image: ghcr.io/esphome/esphome:latest
+    volumes:
+      - /data/esphome:/config
+    restart: unless-stopped
+    network_mode: host
+
+  prometheus:
+    container_name: prometheus
+    image: prom/prometheus:latest
+    volumes:
+      - /data/prometheus:/prometheus
+      - /opt/smart-home/config/prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=30d'
+    restart: unless-stopped
+
+  node-exporter:
+    container_name: node-exporter
+    image: prom/node-exporter:latest
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - '--path.rootfs=/rootfs'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+    ports:
+      - "9100:9100"
+    restart: unless-stopped
+
+  grafana:
+    container_name: grafana
+    image: grafana/grafana:latest
+    volumes:
+      - /data/grafana:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+
+  smartctl-exporter:
+    container_name: smartctl-exporter
+    image: prometheuscommunity/smartctl-exporter:latest
+    privileged: true
+    user: root
+    volumes:
+      - /dev:/dev
+    group_add:
+      - disk
+    ports:
+      - "9633:9633"
+    restart: unless-stopped

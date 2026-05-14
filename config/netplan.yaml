@@ -1,0 +1,33 @@
+network:
+  version: 2
+  ethernets:
+    console:
+      match:
+        macaddress: "1c:6f:65:94:af:93"
+      set-name: console
+      addresses:
+        - "192.168.10.254/24"
+    intel0:
+      match:
+        macaddress: "90:e2:ba:0b:ab:98"
+      set-name: intel0
+      addresses:
+        - "192.168.11.254/24"
+    intel1:
+      match:
+        macaddress: "90:e2:ba:0b:ab:99"
+      set-name: intel1
+      addresses:
+        - "192.168.12.254/24"
+    intel2:
+      match:
+        macaddress: "90:e2:ba:0b:ab:9a"
+      set-name: intel2
+      addresses:
+        - "192.168.13.254/24"
+    intel3:
+      match:
+        macaddress: "90:e2:ba:0b:ab:9b"
+      set-name: intel3
+      addresses:
+        - "192.168.14.254/24"
