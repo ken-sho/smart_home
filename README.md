@@ -238,6 +238,7 @@ curl https://api.telegram.org && echo OK  # Telegram доступен
 | v0.1 | 2026-05 | Начальная архитектура |
 | v0.2 | 2026-05 | Установка Ubuntu, Docker стек, IoT сеть |
 | v0.3 | 2026-05 | Первое устройство (Tuya датчик), Grafana дашборд, Git |
+| v0.4 | 2026-05 | Tailscale VPN, Funnel для HA, удалённый доступ к Grafana |
 ---
 
 ### Шаг 10 — Tailscale + Funnel
