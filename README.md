@@ -1,7 +1,7 @@
 # Smart Home Core
 
 Система умного дома на базе собственного сервера Core.  
-Версия документации: **v0.4**  
+Версия документации: **v0.5**  
 Статус: в разработке
 
 ---
@@ -70,6 +70,13 @@ docker compose up -d
   docker-compose.yml
   config/
     prometheus.yml
+
+/opt/smart-home-git/      # Git репозиторий
+  README.md
+  docker-compose.yml
+  config/
+  scripts/
+    backup.sh             # git add + commit + push (запускается крон в 3:00)
 
 /data/                    # HDD 500GB (UUID: 0d812c59-9f59-4129-9808-36abc88ad3ec)
   homeassistant/          # Конфиги Home Assistant
@@ -205,22 +212,32 @@ sudo systemctl start awg-quick@wg0
 curl -s --max-time 5 https://api.telegram.org && echo OK
 ```
 
-### Шаг 10 — Tailscale
+### Шаг 10 — Tailscale + Funnel
 
 ```bash
+# Установка
 curl -fsSL https://tailscale.com/install.sh | sh
-tailscale up
-# Авторизоваться через браузер (gakto1981@gmail.com)
-```
 
-**После авторизации:**
-- Tailscale IP Core: `100.69.214.120`
-- Публичный URL HA (Funnel): `https://core.tail751bc9.ts.net`
+# Авторизация (откроется ссылка — войти через gakto1981@gmail.com)
+# Запускать без netfilter из-за конфликта с AmneziaWG
+tailscale up --netfilter-mode=off
 
-```bash
-# Запуск Funnel для Home Assistant
+# Запуск Funnel для Home Assistant (публичный HTTPS)
 tailscale funnel --bg 8123
+
+# Маршрут для корректной работы через AmneziaWG (асимметричная маршрутизация)
+cat > /etc/networkd-dispatcher/routable.d/50-tailscale-routes.sh << 'ROUTE'
+#!/bin/bash
+ip route add 100.64.0.0/10 dev tailscale0 2>/dev/null || true
+ROUTE
+chmod +x /etc/networkd-dispatcher/routable.d/50-tailscale-routes.sh
+# Применить сразу без перезагрузки
+ip route add 100.64.0.0/10 dev tailscale0 2>/dev/null || true
 ```
+
+**Результат:**
+- Tailscale IP Core: `100.69.214.120`
+- Публичный URL HA: `https://core.tail751bc9.ts.net`
 
 **Доступ к сервисам:**
 
@@ -230,6 +247,9 @@ tailscale funnel --bg 8123
 | Home Assistant (локальный) | http://192.168.10.254:8123 |
 | Grafana | http://100.69.214.120:3000 |
 | Prometheus | http://100.69.214.120:9090 |
+
+> Funnel (публичный интернет) — только для HA, нужен для Алисы.  
+> Grafana и Prometheus — только внутри tailnet, без Funnel.
 
 ### Шаг 11 — Проверка
 
@@ -241,6 +261,24 @@ curl http://localhost:3000                             # Grafana
 curl -s https://api.telegram.org && echo OK            # Telegram доступен
 tailscale status                                       # Tailscale подключён
 curl https://core.tail751bc9.ts.net && echo OK         # Funnel работает
+```
+
+---
+
+## Резервное копирование
+
+Автоматический бэкап запускается крон-джобом ежесуточно в 3:00:
+
+```bash
+/opt/smart-home-git/scripts/backup.sh
+```
+
+Скрипт выполняет `git add + commit + push` в репозиторий `https://github.com/ken-sho/smart_home.git`.
+
+Для ручного запуска:
+
+```bash
+bash /opt/smart-home-git/scripts/backup.sh
 ```
 
 ---
@@ -274,4 +312,5 @@ curl https://core.tail751bc9.ts.net && echo OK         # Funnel работает
 | v0.1 | 2026-05 | Начальная архитектура |
 | v0.2 | 2026-05 | Установка Ubuntu, Docker стек, IoT сеть |
 | v0.3 | 2026-05 | Первое устройство (Tuya датчик), Grafana дашборд, Git |
-| v0.4 | 2026-05 | Tailscale VPN, Funnel для HA, удалённый доступ |
+| v0.4 | 2026-05 | Tailscale VPN, Funnel для HA, удалённый доступ к Grafana |
+| v0.5 | 2026-05 | Yandex Smart Home (Алиса), исправление маршрутизации Tailscale + AmneziaWG |

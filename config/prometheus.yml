@@ -18,4 +18,4 @@ scrape_configs:
     static_configs:
       - targets: ["192.168.10.254:8123"]
     metrics_path: /api/prometheus
-    bearer_token: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiIzM2U5MGI2ODZhMTI0MTczYjJiODIxZmIyMGU2YzE0NCIsImlhdCI6MTc3ODQ5Njk4MCwiZXhwIjoyMDkzODU2OTgwfQ.CtH-BO0Jcba0VeHnbN19-aHV-0qLQbf0h1zyo-gRPmE'
+    bearer_token: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJhMmIxMWQ3NWIxMTE0NDM5YjZiOGM5NTc4OGEwOTc0ZCIsImlhdCI6MTc3ODc5MDM0NywiZXhwIjoyMDk0MTUwMzQ3fQ.NKsGgQY1ly2S5zoE65pDDxkdNoCiKAlrq5Agb_2ggh8'
