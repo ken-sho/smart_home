@@ -267,18 +267,18 @@ curl https://core.tail751bc9.ts.net && echo OK         # Funnel работает
 
 ## Резервное копирование
 
-Автоматический бэкап запускается крон-джобом ежесуточно в 3:00:
+Автоматический бэкап запускается крон-джобом ежесуточно в 3:00.
 
-```bash
-/opt/smart-home-git/scripts/backup.sh
-```
+Состоит из двух скриптов которые запускаются последовательно:
 
-Скрипт выполняет `git add + commit + push` в репозиторий `https://github.com/ken-sho/smart_home.git`.
+- `collect_configs.sh` — собирает актуальные конфиги в репозиторий
+- `git_push.sh` — делает commit и push в GitHub
 
 Для ручного запуска:
 
 ```bash
-bash /opt/smart-home-git/scripts/backup.sh
+bash /opt/smart-home-git/scripts/collect_configs.sh
+bash /opt/smart-home-git/scripts/git_push.sh
 ```
 
 ---
