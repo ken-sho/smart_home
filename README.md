@@ -76,7 +76,8 @@ docker compose up -d
   docker-compose.yml
   config/
   scripts/
-    backup.sh             # git add + commit + push (запускается крон в 3:00)
+    collect_configs.sh    # копирует конфиги в репозиторий
+    git_push.sh           # git pull + commit + push (запускается крон в 3:00)
 
 /data/                    # HDD 500GB (UUID: 0d812c59-9f59-4129-9808-36abc88ad3ec)
   homeassistant/          # Конфиги Home Assistant
