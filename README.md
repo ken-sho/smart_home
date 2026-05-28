@@ -1,7 +1,7 @@
 # Smart Home Core
 
 Система умного дома на базе собственного сервера Core.  
-Версия документации: **v0.5**  
+Версия документации: **v0.6**  
 Статус: в разработке
 
 ---
@@ -51,7 +51,7 @@
 | zigbee2mqtt | koenkk/zigbee2mqtt:latest | 8080 | Поддержка Zigbee устройств |
 | esphome | ghcr.io/esphome/esphome:latest | 6052 | Кастомные прошивки ESP |
 | prometheus | prom/prometheus:latest | 9090 | Сбор метрик |
-| node-exporter | prom/node-exporter:latest | 9100 | Метрики сервера |
+| node-exporter | prom/node-exporter:latest | 9100 | Метрики сервера + textfile collector |
 | smartctl-exporter | prometheuscommunity/smartctl-exporter:latest | 9633 | SMART метрики дисков |
 | grafana | grafana/grafana:latest | 3000 | Дашборды |
 
@@ -75,9 +75,11 @@ docker compose up -d
   README.md
   docker-compose.yml
   config/
+    grafana_dashboards/   # JSON экспорт дашбордов Grafana
   scripts/
-    collect_configs.sh    # копирует конфиги в репозиторий
-    git_push.sh           # git pull + commit + push (запускается крон в 3:00)
+    collect_configs.sh    # копирует конфиги в репозиторий + экспорт дашбордов Grafana
+    git_push.sh           # git pull --rebase + commit + push (запускается крон в 3:00)
+    check_connectivity.sh # проверка Tailscale и Telegram, генерирует textfile метрики
 
 /data/                    # HDD 500GB (UUID: 0d812c59-9f59-4129-9808-36abc88ad3ec)
   homeassistant/          # Конфиги Home Assistant
@@ -87,7 +89,25 @@ docker compose up -d
   prometheus/             # Данные Prometheus
   grafana/                # Данные Grafana
   backups/                # Резервные копии
+
+/var/lib/node-exporter/textfile/  # Textfile метрики для node-exporter
+  connectivity.prom               # Статус Tailscale и Telegram
 ```
+
+---
+
+## Мониторинг
+
+### Метрики подключения
+
+Скрипт `/usr/local/bin/check_connectivity.sh` запускается каждую минуту через крон и генерирует метрики:
+
+| Метрика | Описание |
+|---------|----------|
+| `tailscale_up` | Статус Tailscale (1=Running, 0=не работает) |
+| `telegram_reachable` | Доступность Telegram через AWG (1=OK, 0=недоступен) |
+
+Метрики отдаются через node-exporter textfile collector и видны в Grafana на дашборде **System — Core**.
 
 ---
 
@@ -185,6 +205,8 @@ cp /opt/smart-home-git/config/ha_automations.yaml /data/homeassistant/automation
 
 ```bash
 mkdir -p /data/{homeassistant,mosquitto/config,mosquitto/data,mosquitto/log,zigbee2mqtt,esphome,prometheus,grafana,backups}
+mkdir -p /var/lib/node-exporter/textfile
+chmod 755 /var/lib/node-exporter/textfile
 chown -R 65534:65534 /data/prometheus
 chown -R 472:472 /data/grafana
 chown -R 1883:1883 /data/mosquitto
@@ -205,7 +227,10 @@ sudo systemctl restart isc-dhcp-server
 
 ```bash
 # Установить AmneziaWG согласно документации amnezia.org
-# Скопировать конфиг из защищённого хранилища
+# ВАЖНО: конфиг генерируется в приложении Amnezia на телефоне.
+# При переустановке приложения конфиг пересоздаётся с новыми ключами —
+# старый wg0.conf становится недействительным. Экспортировать новый конфиг
+# через Amnezia → Настройки → Экспорт и скопировать на Core.
 sudo cp wg0.conf /etc/amnezia/amneziawg/wg0.conf
 sudo systemctl enable awg-quick@wg0
 sudo systemctl start awg-quick@wg0
@@ -252,7 +277,21 @@ ip route add 100.64.0.0/10 dev tailscale0 2>/dev/null || true
 > Funnel (публичный интернет) — только для HA, нужен для Алисы.  
 > Grafana и Prometheus — только внутри tailnet, без Funnel.
 
-### Шаг 11 — Проверка
+### Шаг 11 — Скрипт мониторинга подключения
+
+```bash
+# Скопировать скрипт из репозитория
+cp /opt/smart-home-git/scripts/check_connectivity.sh /usr/local/bin/
+chmod +x /usr/local/bin/check_connectivity.sh
+
+# Добавить в крон (каждую минуту)
+echo "* * * * * root /usr/local/bin/check_connectivity.sh" > /etc/cron.d/connectivity-check
+
+# Запустить первый раз вручную
+/usr/local/bin/check_connectivity.sh
+```
+
+### Шаг 12 — Проверка
 
 ```bash
 docker ps                                              # все контейнеры Up
@@ -262,6 +301,7 @@ curl http://localhost:3000                             # Grafana
 curl -s https://api.telegram.org && echo OK            # Telegram доступен
 tailscale status                                       # Tailscale подключён
 curl https://core.tail751bc9.ts.net && echo OK         # Funnel работает
+curl -s http://localhost:9100/metrics | grep -E "tailscale_up|telegram_reachable"  # метрики
 ```
 
 ---
@@ -272,7 +312,7 @@ curl https://core.tail751bc9.ts.net && echo OK         # Funnel работает
 
 Состоит из двух скриптов которые запускаются последовательно:
 
-- `collect_configs.sh` — собирает актуальные конфиги в репозиторий
+- `collect_configs.sh` — собирает актуальные конфиги в репозиторий + экспортирует дашборды Grafana
 - `git_push.sh` — делает commit и push в GitHub
 
 Для ручного запуска:
@@ -294,6 +334,7 @@ bash /opt/smart-home-git/scripts/git_push.sh
 - HA Long-Lived Access Token
 - Пароли Wi-Fi сетей
 - Tailscale authkey
+- Grafana admin password
 
 ---
 
@@ -312,3 +353,4 @@ bash /opt/smart-home-git/scripts/git_push.sh
 | v0.3 | 2026-05 | Первое устройство (Tuya датчик), Grafana дашборд, Git |
 | v0.4 | 2026-05 | Tailscale VPN, Funnel для HA, удалённый доступ к Grafana |
 | v0.5 | 2026-05 | Yandex Smart Home (Алиса), исправление маршрутизации Tailscale + AmneziaWG |
+| v0.6 | 2026-05 | Переустановка AWG, мониторинг Tailscale + Telegram в Grafana, экспорт дашбордов в Git |
