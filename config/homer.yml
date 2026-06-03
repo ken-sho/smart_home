@@ -1,0 +1,48 @@
+title: "Core"
+subtitle: "Smart Home Dashboard"
+header: true
+footer: false
+connectivityCheck: false
+
+theme: default
+
+services:
+  - name: "Умный дом"
+    icon: "fas fa-home"
+    items:
+      - name: "Home Assistant"
+        subtitle: "Автоматизация"
+        url: "https://core.tail751bc9.ts.net"
+        target: "_blank"
+      - name: "Zigbee2MQTT"
+        subtitle: "Zigbee устройства"
+        url: "http://100.69.214.120:8080"
+        target: "_blank"
+      - name: "ESPHome"
+        subtitle: "ESP устройства"
+        url: "http://100.69.214.120:6052"
+        target: "_blank"
+
+  - name: "Мониторинг"
+    icon: "fas fa-chart-line"
+    items:
+      - name: "Grafana"
+        subtitle: "Дашборды"
+        url: "http://100.69.214.120:3000"
+        target: "_blank"
+      - name: "Prometheus"
+        subtitle: "Метрики"
+        url: "http://100.69.214.120:9090"
+        target: "_blank"
+
+  - name: "Личное"
+    icon: "fas fa-user"
+    items:
+      - name: "Vaultwarden"
+        subtitle: "Пароли"
+        url: "https://core.tail751bc9.ts.net/vault/"
+        target: "_blank"
+      - name: "Портал"
+        subtitle: "Заметки, задачи, финансы"
+        url: "http://100.69.214.120:7000"
+        target: "_blank"

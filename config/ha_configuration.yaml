@@ -24,3 +24,6 @@ http:
     - ::1
     - 100.0.0.0/8
     - 0.0.0.0/0
+
+recorder:
+  db_url: postgresql://homeassistant:homeassistant%40unix.ru@localhost:5432/homeassistant

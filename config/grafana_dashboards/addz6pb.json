@@ -18,13 +18,13 @@
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 0,
-  "id": 2125893616013312,
+  "id": 3689345253908480,
   "liveNow": false,
   "panels": [
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "cfl1f8avnumf4b"
+        "uid": "ffnxnere9kw00e"
       },
       "fieldConfig": {
         "defaults": {
@@ -91,7 +91,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "cfl1f8avnumf4b"
+            "uid": "ffnxnere9kw00e"
           },
           "editorMode": "code",
           "expr": "(1 - avg(rate(node_cpu_seconds_total{mode=\"idle\"}[1m]))) * 100",
@@ -106,7 +106,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "cfl1f8avnumf4b"
+        "uid": "ffnxnere9kw00e"
       },
       "fieldConfig": {
         "defaults": {
@@ -173,7 +173,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "cfl1f8avnumf4b"
+            "uid": "ffnxnere9kw00e"
           },
           "editorMode": "code",
           "expr": "(1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) * 100",
@@ -188,7 +188,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "cfl1f8avnumf4b"
+        "uid": "ffnxnere9kw00e"
       },
       "fieldConfig": {
         "defaults": {
@@ -255,7 +255,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "cfl1f8avnumf4b"
+            "uid": "ffnxnere9kw00e"
           },
           "editorMode": "code",
           "expr": "(1 - node_filesystem_avail_bytes{mountpoint=\"/\"} / node_filesystem_size_bytes{mountpoint=\"/\"}) * 100",
@@ -270,7 +270,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "cfl1f8avnumf4b"
+        "uid": "ffnxnere9kw00e"
       },
       "fieldConfig": {
         "defaults": {
@@ -337,7 +337,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "cfl1f8avnumf4b"
+            "uid": "ffnxnere9kw00e"
           },
           "editorMode": "code",
           "expr": "smartctl_device_temperature{device=\"sda\"}",
@@ -352,7 +352,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "cfl1f8avnumf4b"
+        "uid": "ffnxnere9kw00e"
       },
       "fieldConfig": {
         "defaults": {
@@ -420,7 +420,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "cfl1f8avnumf4b"
+            "uid": "ffnxnere9kw00e"
           },
           "editorMode": "code",
           "expr": "smartctl_device_smart_status{device=\"sda\"}",
@@ -435,7 +435,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "cfl1f8avnumf4b"
+        "uid": "ffnxnere9kw00e"
       },
       "fieldConfig": {
         "defaults": {
@@ -503,7 +503,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "cfl1f8avnumf4b"
+            "uid": "ffnxnere9kw00e"
           },
           "editorMode": "code",
           "expr": "tailscale_up",
@@ -518,7 +518,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "cfl1f8avnumf4b"
+        "uid": "ffnxnere9kw00e"
       },
       "fieldConfig": {
         "defaults": {
@@ -585,7 +585,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "cfl1f8avnumf4b"
+            "uid": "ffnxnere9kw00e"
           },
           "editorMode": "code",
           "expr": "avg(node_hwmon_temp_celsius{chip=\"platform_coretemp_0\"})",
@@ -600,7 +600,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "cfl1f8avnumf4b"
+        "uid": "ffnxnere9kw00e"
       },
       "fieldConfig": {
         "defaults": {
@@ -667,7 +667,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "cfl1f8avnumf4b"
+            "uid": "ffnxnere9kw00e"
           },
           "editorMode": "code",
           "expr": "(1 - node_memory_SwapFree_bytes / node_memory_SwapTotal_bytes) * 100",
@@ -682,7 +682,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "cfl1f8avnumf4b"
+        "uid": "ffnxnere9kw00e"
       },
       "fieldConfig": {
         "defaults": {
@@ -749,7 +749,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "cfl1f8avnumf4b"
+            "uid": "ffnxnere9kw00e"
           },
           "editorMode": "code",
           "expr": "(1 - node_filesystem_avail_bytes{mountpoint=\"/data\"} / node_filesystem_size_bytes{mountpoint=\"/data\"}) * 100",
@@ -764,7 +764,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "cfl1f8avnumf4b"
+        "uid": "ffnxnere9kw00e"
       },
       "fieldConfig": {
         "defaults": {
@@ -831,7 +831,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "cfl1f8avnumf4b"
+            "uid": "ffnxnere9kw00e"
           },
           "editorMode": "code",
           "expr": "smartctl_device_temperature{device=\"sdb\"}",
@@ -846,7 +846,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "cfl1f8avnumf4b"
+        "uid": "ffnxnere9kw00e"
       },
       "fieldConfig": {
         "defaults": {
@@ -914,7 +914,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "cfl1f8avnumf4b"
+            "uid": "ffnxnere9kw00e"
           },
           "editorMode": "code",
           "expr": "smartctl_device_smart_status{device=\"sdb\"}",
@@ -929,7 +929,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "cfl1f8avnumf4b"
+        "uid": "ffnxnere9kw00e"
       },
       "fieldConfig": {
         "defaults": {
@@ -997,7 +997,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "cfl1f8avnumf4b"
+            "uid": "ffnxnere9kw00e"
           },
           "editorMode": "code",
           "expr": "telegram_reachable",
@@ -1034,5 +1034,5 @@
   "timezone": "browser",
   "title": "System \u2014 Core",
   "uid": "addz6pb",
-  "version": 22
+  "version": 2
 }
