@@ -1,7 +1,7 @@
 # Smart Home Core
 
 Система умного дома на базе собственного сервера Core.  
-Версия документации: **v0.7**  
+Версия документации: **v0.8**  
 Статус: в разработке
 
 ---
@@ -71,10 +71,7 @@ docker compose up -d
 **PostgreSQL 18** установлен локально на Core (не в Docker).
 
 ```bash
-# Статус
 sudo systemctl status postgresql
-
-# Подключение
 sudo -u postgres psql
 ```
 
@@ -83,16 +80,16 @@ sudo -u postgres psql
 | База | Пользователь | Назначение |
 |------|-------------|------------|
 | vaultwarden | vaultwarden | Менеджер паролей |
-| portal | portal | Личный портал (задачи, финансы, заметки) |
+| grafana | grafana | Дашборды Grafana |
+| homeassistant | homeassistant | История состояний HA |
+| portal | portal | Личный портал |
 
 ### Подключение из Docker контейнеров
 
-Контейнеры подключаются через `host.docker.internal` (172.17.0.1 / 172.18.0.1).  
+Контейнеры подключаются через `host.docker.internal` (172.17.0.1 / 172.18.0.1).
 Разрешённые подсети в `pg_hba.conf`:
-- `172.17.0.0/16` — Docker bridge
-- `172.18.0.0/16` — Docker bridge (доп.)
-- `192.168.10.0/24` — консольный интерфейс
-- `192.168.11.0/24` — IoT сеть
+- `172.17.0.0/16`, `172.18.0.0/16` — Docker bridge
+- `192.168.10.0/24`, `192.168.11.0/24` — локальные интерфейсы
 - `100.64.0.0/10` — Tailscale
 
 ---
@@ -102,7 +99,7 @@ sudo -u postgres psql
 Nginx терминирует TLS и проксирует сервисы. Сертификат от Tailscale.
 
 ```bash
-# Получить/обновить сертификат
+# Получить/обновить сертификат (раз в год)
 tailscale cert core.tail751bc9.ts.net
 cp core.tail751bc9.ts.net.* /opt/smart-home/config/nginx/
 docker compose restart nginx
@@ -114,6 +111,8 @@ docker compose restart nginx
 |-----|--------|--------|
 | `https://core.tail751bc9.ts.net/` | Home Assistant | Публично (Funnel) |
 | `https://core.tail751bc9.ts.net/vault/` | Vaultwarden | Публично (Funnel) |
+| `https://core.tail751bc9.ts.net/portal/` | Личный портал | Telegram Mini App + Tailscale |
+| `https://core.tail751bc9.ts.net/api/` | Portal API | Telegram Mini App + Tailscale |
 | `http://100.69.214.120:8888` | Homer | Только Tailscale |
 | `http://100.69.214.120:3000` | Grafana | Только Tailscale |
 | `http://100.69.214.120:9090` | Prometheus | Только Tailscale |
@@ -124,10 +123,26 @@ docker compose restart nginx
 Интернет → Tailscale Funnel :443 → nginx :8444 (HTTP) → сервисы
 ```
 
-Funnel настроен на порт 8444 (HTTP блок nginx):
 ```bash
 tailscale funnel --bg 8444
 ```
+
+---
+
+## Личный портал
+
+FastAPI + PostgreSQL + Telegram Mini App. Подробная документация в `config/portal/README.md`.
+
+**Запуск:**
+```bash
+systemctl status portal
+systemctl restart portal
+journalctl -u portal -f
+```
+
+**Доступ:**
+- Telegram: `t.me/ken_sho_portal_bot/portal`
+- Tailscale: `http://100.69.214.120:7000`
 
 ---
 
@@ -151,35 +166,44 @@ tailscale funnel --bg 8444
     prometheus.yml
     nginx.conf
     homer.yml
-    grafana_dashboards/   # JSON экспорт дашбордов Grafana
+    netplan.yaml
+    dhcpd.conf
+    ha_configuration.yaml
+    portal.service
+    grafana_dashboards/
+    portal/
+      README.md           # Документация портала
+      main.py
+      requirements.txt
+      *_schema.sql
   scripts/
-    collect_configs.sh    # копирует конфиги в репозиторий
-    git_push.sh           # git pull --rebase + commit + push (крон в 3:00)
-    check_connectivity.sh # проверка Tailscale и Telegram
+    collect_configs.sh
+    git_push.sh
+    check_connectivity.sh
 
 /data/                    # HDD 500GB (UUID: 0d812c59-9f59-4129-9808-36abc88ad3ec)
-  homeassistant/          # Конфиги Home Assistant
-  mosquitto/              # Данные MQTT
-  zigbee2mqtt/            # Данные Zigbee2MQTT
-  esphome/                # Прошивки ESPHome
-  prometheus/             # Данные Prometheus
-  grafana/                # Данные Grafana
-  vaultwarden/            # Данные Vaultwarden
-  homer/                  # Конфиг Homer (config.yml)
-  portal/                 # Данные портала
-  backups/                # Резервные копии
+  homeassistant/
+  mosquitto/
+  zigbee2mqtt/
+  esphome/
+  prometheus/
+  grafana/
+  vaultwarden/
+  homer/
+  portal/
+    portal.html
+    backend/
+  backups/
 
-/var/lib/node-exporter/textfile/  # Textfile метрики для node-exporter
-  connectivity.prom               # Статус Tailscale и Telegram
+/var/lib/node-exporter/textfile/
+  connectivity.prom
 ```
 
 ---
 
 ## Мониторинг
 
-### Метрики подключения
-
-Скрипт `/usr/local/bin/check_connectivity.sh` запускается каждую минуту через крон и генерирует метрики:
+Скрипт `/usr/local/bin/check_connectivity.sh` — крон каждую минуту:
 
 | Метрика | Описание |
 |---------|----------|
@@ -203,45 +227,7 @@ tailscale funnel --bg 8444
 
 ```bash
 sudo nano /etc/netplan/50-cloud-init.yaml
-```
-
-```yaml
-network:
-  version: 2
-  ethernets:
-    console:
-      match:
-        macaddress: "1c:6f:65:94:af:93"
-      set-name: console
-      addresses:
-        - "192.168.10.254/24"
-    intel0:
-      match:
-        macaddress: "90:e2:ba:0b:ab:98"
-      set-name: intel0
-      addresses:
-        - "192.168.11.254/24"
-    intel1:
-      match:
-        macaddress: "90:e2:ba:0b:ab:99"
-      set-name: intel1
-      addresses:
-        - "192.168.12.254/24"
-    intel2:
-      match:
-        macaddress: "90:e2:ba:0b:ab:9a"
-      set-name: intel2
-      addresses:
-        - "192.168.13.254/24"
-    intel3:
-      match:
-        macaddress: "90:e2:ba:0b:ab:9b"
-      set-name: intel3
-      addresses:
-        - "192.168.14.254/24"
-```
-
-```bash
+# Скопировать содержимое из config/netplan.yaml
 sudo netplan apply
 ```
 
@@ -270,13 +256,12 @@ curl -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
 sudo sh -c 'echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] \
   https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
   > /etc/apt/sources.list.d/pgdg.list'
-sudo apt update
-sudo apt install -y postgresql-18
+sudo apt update && sudo apt install -y postgresql-18
 ```
 
-Настроить `pg_hba.conf` и `postgresql.conf` (см. раздел База данных).
+Настроить `pg_hba.conf` и `postgresql.conf` (добавить подсети 172.17/18, 192.168.10/11, 100.64/10).
 
-Восстановить дамп из зашифрованного бэкапа:
+Восстановить данные из зашифрованного бэкапа:
 ```bash
 gpg --decrypt --passphrase "$POSTGRES_BACKUP_PASS" --batch postgres_full.sql.gpg | sudo -u postgres psql
 ```
@@ -301,9 +286,7 @@ cp /opt/smart-home-git/config/ha_automations.yaml /data/homeassistant/automation
 cp /opt/smart-home-git/config/homer.yml /data/homer/config.yml
 ```
 
-Восстановить `.env` из защищённого хранилища.
-
-Получить TLS сертификат:
+Восстановить `.env` из защищённого хранилища. Получить TLS сертификат:
 ```bash
 tailscale cert core.tail751bc9.ts.net
 cp core.tail751bc9.ts.net.* /opt/smart-home/config/nginx/
@@ -312,17 +295,29 @@ cp core.tail751bc9.ts.net.* /opt/smart-home/config/nginx/
 ### Шаг 8 — Запуск стека
 
 ```bash
-mkdir -p /data/{homeassistant,mosquitto/config,mosquitto/data,mosquitto/log,zigbee2mqtt,esphome,prometheus,grafana,vaultwarden,homer,portal,backups}
+mkdir -p /data/{homeassistant,mosquitto/config,mosquitto/data,mosquitto/log,zigbee2mqtt,esphome,prometheus,grafana,vaultwarden,homer,portal/backend,backups}
 mkdir -p /var/lib/node-exporter/textfile
 chmod 755 /var/lib/node-exporter/textfile
 chown -R 65534:65534 /data/prometheus
 chown -R 472:472 /data/grafana
 chown -R 1883:1883 /data/mosquitto
-cd /opt/smart-home
-docker compose up -d
+cd /opt/smart-home && docker compose up -d
 ```
 
-### Шаг 9 — DHCP сервер
+### Шаг 9 — Портал
+
+```bash
+sudo apt install python3-venv python3-pip -y
+cd /data/portal/backend
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r /opt/smart-home-git/config/portal/requirements.txt
+cp /opt/smart-home-git/config/portal.service /etc/systemd/system/
+systemctl daemon-reload && systemctl enable portal && systemctl start portal
+```
+
+Подробнее — `config/portal/README.md`.
+
+### Шаг 10 — DHCP сервер
 
 ```bash
 sudo apt install isc-dhcp-server -y
@@ -331,27 +326,24 @@ sudo sed -i 's/INTERFACESv4=""/INTERFACESv4="intel0"/' /etc/default/isc-dhcp-ser
 sudo systemctl restart isc-dhcp-server
 ```
 
-### Шаг 10 — AmneziaWG VPN
+### Шаг 11 — AmneziaWG VPN
 
 ```bash
 # Установить AmneziaWG согласно документации amnezia.org
 # ВАЖНО: конфиг генерируется в приложении Amnezia на телефоне.
 # При переустановке приложения конфиг пересоздаётся с новыми ключами —
-# старый wg0.conf становится недействительным. Экспортировать новый конфиг
-# через Amnezia → Настройки → Экспорт и скопировать на Core.
+# старый wg0.conf становится недействительным.
 sudo cp wg0.conf /etc/amnezia/amneziawg/wg0.conf
 sudo systemctl enable awg-quick@wg0
 sudo systemctl start awg-quick@wg0
 curl -s --max-time 5 https://api.telegram.org && echo OK
 ```
 
-### Шаг 11 — Tailscale + Funnel
+### Шаг 12 — Tailscale + Funnel
 
 ```bash
 curl -fsSL https://tailscale.com/install.sh | sh
 tailscale up --netfilter-mode=off
-
-# Funnel через nginx
 tailscale funnel --bg 8444
 
 cat > /etc/networkd-dispatcher/routable.d/50-tailscale-routes.sh << 'ROUTE'
@@ -362,22 +354,22 @@ chmod +x /etc/networkd-dispatcher/routable.d/50-tailscale-routes.sh
 ip route add 100.64.0.0/10 dev tailscale0 2>/dev/null || true
 ```
 
-### Шаг 12 — Скрипт мониторинга
+### Шаг 13 — Мониторинг подключения
 
 ```bash
 cp /opt/smart-home-git/scripts/check_connectivity.sh /usr/local/bin/
 chmod +x /usr/local/bin/check_connectivity.sh
 echo "* * * * * root /usr/local/bin/check_connectivity.sh" > /etc/cron.d/connectivity-check
-/usr/local/bin/check_connectivity.sh
 ```
 
-### Шаг 13 — Проверка
+### Шаг 14 — Проверка
 
 ```bash
 docker ps                                              # все контейнеры Up
 ping 192.168.11.253                                    # микротик доступен
 curl http://localhost:8123                             # Home Assistant
 curl http://localhost:3000                             # Grafana
+curl http://localhost:7000/api/health                  # Портал
 curl -k https://localhost:8443                         # nginx
 curl -s https://api.telegram.org && echo OK            # Telegram доступен
 tailscale status                                       # Tailscale подключён
@@ -388,12 +380,10 @@ curl https://core.tail751bc9.ts.net && echo OK         # Funnel работает
 
 ## Резервное копирование
 
-Автоматический бэкап запускается крон-джобом ежесуточно в 3:00.
+Автоматический бэкап — крон ежесуточно в 3:00:
 
-- `collect_configs.sh` — собирает конфиги в репозиторий + экспортирует дашборды Grafana
-- `git_push.sh` — делает commit и push в GitHub
-
-Для ручного запуска:
+- `collect_configs.sh` — собирает конфиги, схемы портала, дашборды Grafana
+- `git_push.sh` — коммит и пуш в GitHub
 
 ```bash
 bash /opt/smart-home-git/scripts/collect_configs.sh
@@ -406,23 +396,23 @@ PostgreSQL бэкапы — через Barman на NAS (планируется).
 
 ## Секреты (НЕ в Git)
 
-Хранятся в `/opt/smart-home/.env`:
+**`/opt/smart-home/.env`:**
+- `GRAFANA_PASSWORD`, `VW_DB_PASSWORD`, `VW_ADMIN_TOKEN`, `PORTAL_DB_PASSWORD`
 
-- PostgreSQL пароли (VW_DB_PASSWORD, PORTAL_DB_PASSWORD)
-- Vaultwarden ADMIN_TOKEN (Argon2)
-- Grafana admin password (GRAFANA_PASSWORD)
-- AmneziaWG конфиг (`/etc/amnezia/amneziawg/wg0.conf`)
-- Telegram Bot токен
-- Tuya API credentials
-- HA Long-Lived Access Token
-- Пароли Wi-Fi сетей
-- Tailscale authkey
+**`/data/portal/backend/.env` (через systemd Environment=):**
+- `DB_HOST/PORT/NAME/USER/PASS`, `PORTAL_HTML`
+
+**Отдельно (защищённое хранилище):**
+- AmneziaWG конфиг, Tailscale authkey, пароли Wi-Fi
+
+**В БД `app.settings`:**
+- `telegram_bot_token`, `telegram_owner_id`, `telegram_chat_id`
 
 ---
 
 ## Устройства IoT
 
-Всё касательно IoT-устройств — в директории `devices/`: перечень устройств, карточки перепрошивки, конфиги и прошивки.
+Всё касательно IoT-устройств — в директории `devices/`.
 
 ---
 
@@ -435,5 +425,6 @@ PostgreSQL бэкапы — через Barman на NAS (планируется).
 | v0.3 | 2026-05 | Первое устройство (Tuya датчик), Grafana дашборд, Git |
 | v0.4 | 2026-05 | Tailscale VPN, Funnel для HA, удалённый доступ к Grafana |
 | v0.5 | 2026-05 | Yandex Smart Home (Алиса), исправление маршрутизации Tailscale + AmneziaWG |
-| v0.6 | 2026-05 | Переустановка AWG, мониторинг Tailscale + Telegram в Grafana, экспорт дашбордов в Git |
-| v0.7 | 2026-06 | PostgreSQL 18 локально, Vaultwarden, nginx reverse proxy, Homer, Tailscale TLS сертификат |
+| v0.6 | 2026-05 | Переустановка AWG, мониторинг Tailscale + Telegram в Grafana |
+| v0.7 | 2026-06 | PostgreSQL 18, Vaultwarden, nginx reverse proxy, Homer, Grafana/HA → PostgreSQL |
+| v0.8 | 2026-06 | Личный портал (FastAPI + PostgreSQL + Telegram Mini App), авторизация |

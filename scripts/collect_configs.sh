@@ -42,3 +42,15 @@ curl -s http://admin:${GRAFANA_PASSWORD}@localhost:3000/api/search?type=dash-db 
   done
 
 echo "Done!"
+
+# Portal backend
+mkdir -p $REPO/config/portal
+cp /data/portal/backend/main.py $REPO/config/portal/
+cp /data/portal/backend/todo_schema.sql $REPO/config/portal/
+cp /data/portal/backend/notes_schema.sql $REPO/config/portal/
+cp /data/portal/backend/finance_schema.sql $REPO/config/portal/
+cp /data/portal/backend/garage_schema.sql $REPO/config/portal/
+cp /data/portal/backend/requirements.txt $REPO/config/portal/
+
+# Systemd services
+cp /etc/systemd/system/portal.service $REPO/config/portal.service
