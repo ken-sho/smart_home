@@ -54,3 +54,6 @@ cp /data/portal/backend/requirements.txt $REPO/config/portal/
 
 # Systemd services
 cp /etc/systemd/system/portal.service $REPO/config/portal.service
+
+# Portal frontend
+cp /data/portal/portal.html $REPO/config/portal/
