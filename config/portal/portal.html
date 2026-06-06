@@ -96,6 +96,22 @@ body {
   background: var(--red);
   border: 1.5px solid var(--surface);
 }
+/* событийный бейдж: окрашен в цвет события; при нескольких цветах — плюс */
+.nav-btn .badge.evt-multi {
+  width: 11px; height: 11px;
+  top: 2px; right: 2px;
+  border: none;
+  background: var(--red);
+  display: flex; align-items: center; justify-content: center;
+}
+.nav-btn .badge.evt-multi::before {
+  content: ""; position: absolute;
+  width: 5px; height: 1.5px; background: #fff; border-radius: 1px;
+}
+.nav-btn .badge.evt-multi::after {
+  content: ""; position: absolute;
+  width: 1.5px; height: 5px; background: #fff; border-radius: 1px;
+}
 
 .nav-spacer { flex: 1; }
 
@@ -613,6 +629,44 @@ input[type=number]:focus { border-color: var(--accent); }
 .birthday-days.today-badge { background: var(--accent-bg); color: var(--accent-text); }
 .birthday-days.soon-badge { background: var(--yellow-bg); color: var(--yellow); }
 
+/* — today's alert card (нужно «снять», нажав «Поздравил») — */
+.bday-alert {
+  display: flex; align-items: center; gap: 10px;
+  padding: 11px 12px; margin-bottom: 5px;
+  background: var(--accent-bg);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+}
+.bday-alert-emoji { font-size: 19px; line-height: 1; flex-shrink: 0; }
+.bday-alert-info { flex: 1; min-width: 0; }
+.bday-alert-name { font-size: 13px; font-weight: 700; color: var(--accent-text); }
+.bday-alert-sub { font-size: 11px; color: var(--text2); margin-top: 1px; }
+.bday-congrats {
+  flex-shrink: 0;
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 6px 11px; font-size: 11px; font-weight: 600;
+  border: none; border-radius: var(--radius-sm);
+  background: var(--accent); color: #0c140f; cursor: pointer;
+  font-family: inherit; transition: filter .15s;
+}
+.bday-congrats:hover { filter: brightness(1.08); }
+.bday-congrats i { font-size: 14px; }
+
+/* — acknowledged today — */
+.birthday-item.done { opacity: 0.5; }
+.bday-done-badge {
+  font-size: 10px; font-family: var(--mono); color: var(--accent-text);
+  display: inline-flex; align-items: center; gap: 3px; white-space: nowrap;
+}
+.bday-done-badge i { font-size: 12px; }
+.bday-undo {
+  background: none; border: none; color: var(--text3); cursor: pointer;
+  font-size: 14px; padding: 0; margin-left: 2px; line-height: 1;
+  opacity: 0; transition: opacity .12s, color .12s;
+}
+.birthday-item:hover .bday-undo { opacity: 1; }
+.bday-undo:hover { color: var(--text); }
+
 .bday-add {
   padding: 10px 12px;
   border-bottom: 1px solid var(--border);
@@ -622,6 +676,158 @@ input[type=number]:focus { border-color: var(--accent); }
   flex-direction: column;
   gap: 5px;
 }
+.bday-add-row { display: flex; gap: 5px; }
+.bday-dmm { flex: 1; min-width: 0; }
+.bday-dmm.invalid { border-color: var(--red); }
+.bday-year { width: 62px; flex-shrink: 0; }
+/* убираем спиннеры у поля года */
+.bday-year::-webkit-outer-spin-button,
+.bday-year::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.bday-year { -moz-appearance: textfield; }
+
+/* — события: типы, метки, lead-поле — */
+.evt-view { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.evt-lead {
+  display: flex; align-items: center; gap: 5px;
+  font-size: 11px; color: var(--text2); white-space: nowrap;
+}
+.evt-lead input {
+  width: 54px; text-align: center;
+  -moz-appearance: textfield;
+}
+.evt-lead input::-webkit-outer-spin-button,
+.evt-lead input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.evt-type-tag {
+  font-size: 10px; font-family: var(--mono);
+  padding: 1px 7px; border-radius: 20px; white-space: nowrap;
+}
+.evt-meta-row { display: flex; align-items: center; gap: 6px; margin-top: 2px; }
+
+/* строка типа в управлении типами */
+.type-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 10px; margin-bottom: 4px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.type-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+.type-name { flex: 1; font-size: 12px; font-weight: 600; min-width: 0; }
+.type-lead { display: flex; align-items: center; gap: 4px; font-size: 10px; color: var(--text3); white-space: nowrap; }
+.type-lead input {
+  width: 46px; text-align: center; font-size: 11px;
+  -moz-appearance: textfield;
+}
+.type-lead input::-webkit-outer-spin-button,
+.type-lead input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.type-del { background: none; border: none; color: var(--text3); cursor: pointer; font-size: 14px; padding: 0; opacity: 0; transition: opacity .12s, color .12s; }
+.type-row:hover .type-del { opacity: 1; }
+.type-del:hover { color: var(--red); }
+
+/* — daily: чипы дней недели — */
+.evt-wd-row { display: flex; flex-direction: column; gap: 5px; margin-top: 7px; }
+.evt-wd-hint { font-size: 10px; color: var(--text3); }
+.evt-wd-chips { display: flex; gap: 4px; }
+.evt-wd-chip {
+  flex: 1; text-align: center;
+  font-size: 10px; font-family: var(--mono);
+  padding: 5px 0; border-radius: var(--radius-sm);
+  border: 1px solid var(--border2); background: transparent; color: var(--text2);
+  cursor: pointer; user-select: none; transition: all .12s;
+}
+.evt-wd-chip:hover { background: var(--surface2); color: var(--text); }
+.evt-wd-chip.on { background: var(--accent-bg); border-color: var(--accent); color: var(--accent-text); font-weight: 600; }
+
+.evt-del {
+  flex-shrink: 0;
+  background: none; border: none; color: var(--text3);
+  cursor: pointer; font-size: 15px; padding: 2px; line-height: 1;
+  transition: color .12s;
+}
+.evt-del:hover { color: var(--red); }
+.evt-note { font-size: 11px; color: var(--red); padding: 0 12px; min-height: 0; }
+.evt-note:not(:empty) { padding: 2px 12px 6px; }
+
+/* — форма добавления (раскрывается под шапкой) — */
+.evt-accordion { display: none; flex-shrink: 0; border-bottom: 1px solid var(--border); }
+.evt-accordion.open { display: block; animation: evtSlideDown .2s ease; }
+@keyframes evtSlideDown { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
+.evt-form-inner {
+  display: flex; flex-direction: column; gap: 7px;
+  padding: 11px 12px;
+}
+.evt-daily-fields { display: flex; flex-direction: column; gap: 8px; }
+.evt-time-label { font-size: 11px; color: var(--text2); flex: 1; }
+.evt-form-actions { display: flex; gap: 6px; justify-content: flex-end; margin-top: 2px; }
+
+/* — единая форма: шаблон, режим, поля, серия, превью — */
+.evt-accordion.open { max-height: 72vh; overflow-y: auto; }
+.evt-accordion::-webkit-scrollbar { width: 3px; }
+.evt-accordion::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }
+.evt-tpl-row { display: flex; gap: 5px; align-items: center; }
+.evt-seg { display: flex; gap: 4px; }
+.evt-seg-btn {
+  flex: 1; padding: 6px 0;
+  font-size: 11px; font-family: inherit;
+  border: 1px solid var(--border2); background: transparent; color: var(--text2);
+  border-radius: var(--radius-sm); cursor: pointer; transition: all .12s;
+}
+.evt-seg-btn:hover { background: var(--surface2); color: var(--text); }
+.evt-seg-btn.active { background: var(--accent-bg); border-color: var(--accent); color: var(--accent-text); font-weight: 600; }
+.evt-mode-fields { display: flex; flex-direction: column; gap: 7px; }
+.evt-field-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.evt-flabel { font-size: 11px; color: var(--text2); }
+.evt-funit { font-size: 11px; color: var(--text3); }
+.evt-num {
+  width: 52px; text-align: center;
+  font-size: 12px; padding: 6px 4px;
+  border-radius: var(--radius-sm); border: 1px solid var(--border2);
+  background: var(--bg); color: var(--text); font-family: inherit;
+  outline: none; transition: border-color .15s;
+  -moz-appearance: textfield;
+}
+.evt-num:focus { border-color: var(--accent); }
+.evt-num::-webkit-outer-spin-button,
+.evt-num::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.evt-time {
+  font-size: 12px; padding: 5px 7px;
+  border-radius: var(--radius-sm); border: 1px solid var(--border2);
+  background: var(--bg); color: var(--text); font-family: inherit;
+  outline: none; transition: border-color .15s;
+}
+.evt-time:focus { border-color: var(--accent); }
+.evt-check {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  font-size: 11px; color: var(--text2); cursor: pointer; user-select: none;
+}
+.evt-check input[type=checkbox] {
+  width: 15px; height: 15px; accent-color: var(--accent);
+  cursor: pointer; flex-shrink: 0;
+}
+.evt-burst-row { border-top: 1px solid var(--border); padding-top: 9px; margin-top: 1px; }
+.evt-preview {
+  font-size: 11px; line-height: 1.5; color: var(--text2);
+  background: var(--surface2); border-radius: var(--radius-sm);
+  padding: 8px 10px;
+}
+.evt-preview b { color: var(--text); font-weight: 600; }
+.evt-preview:empty { display: none; }
+
+/* — фильтр — */
+.evt-filter {
+  display: flex; gap: 4px;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.evt-filter-btn {
+  flex: 1; padding: 5px 0;
+  font-size: 11px; font-family: inherit;
+  border: 1px solid var(--border2); background: transparent; color: var(--text2);
+  border-radius: var(--radius-sm); cursor: pointer;
+  transition: all .12s;
+}
+.evt-filter-btn:hover { background: var(--surface2); color: var(--text); }
+.evt-filter-btn.active { background: var(--accent-bg); border-color: var(--accent); color: var(--accent-text); font-weight: 600; }
 
 /* ══════════════════════════════
    GARAGE
@@ -1363,37 +1569,93 @@ input[type=number]:focus { border-color: var(--accent); }
 /* ══════════════════════════════
    CALENDAR
 ══════════════════════════════ */
-.cal-event {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  padding: 7px 10px;
+/* — month navigation — */
+.cal-nav {
+  display: flex; align-items: center; gap: 6px;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--border);
   background: var(--surface);
-  border: 1px solid var(--border);
-  border-left: 3px solid var(--blue);
-  border-radius: var(--radius);
-  margin-bottom: 4px;
+  flex-shrink: 0;
 }
-.cal-event.today-event { border-left-color: var(--accent); background: var(--accent-bg); }
-.cal-event.past-event { opacity: 0.4; border-left-color: var(--text3); }
-.cal-time { font-size: 10px; font-family: monospace; color: var(--text3); width: 38px; flex-shrink: 0; padding-top: 2px; }
-.cal-body { flex: 1; min-width: 0; }
-.cal-title { font-size: 12px; font-weight: 600; }
-.cal-meta { font-size: 10px; color: var(--text3); margin-top: 2px; }
-.cal-sync-btn {
-  padding: 5px 10px;
-  font-size: 11px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border2);
-  background: transparent;
-  color: var(--text2);
-  cursor: pointer;
-  font-family: inherit;
+.cal-month {
+  flex: 1; text-align: center;
+  font-size: 13px; font-weight: 600; letter-spacing: -0.2px;
+  text-transform: capitalize;
+}
+.cal-nav-btn {
+  width: 28px; height: 28px; flex-shrink: 0;
+  border: 1px solid var(--border2); background: transparent; color: var(--text2);
+  border-radius: var(--radius-sm); cursor: pointer;
+  display: flex; align-items: center; justify-content: center; font-size: 16px;
   transition: all .15s;
-  display: flex; align-items: center; gap: 4px;
 }
-.cal-sync-btn:hover { background: var(--surface2); color: var(--text); }
-.cal-sync-btn.syncing i { animation: spin .8s linear infinite; }
+.cal-nav-btn:hover { background: var(--surface2); color: var(--text); }
+
+/* — weekday header + day grid — */
+.cal-grid-head {
+  display: grid; grid-template-columns: repeat(7, 1fr);
+  padding: 7px 10px 0; flex-shrink: 0;
+}
+.cal-grid-head span {
+  text-align: center; font-size: 9px; font-family: var(--mono);
+  text-transform: uppercase; letter-spacing: 0.5px; color: var(--text3);
+  padding-bottom: 4px;
+}
+.cal-grid-head span.we { color: var(--red); opacity: 0.65; }
+.cal-grid {
+  display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px;
+  padding: 0 10px 9px; flex-shrink: 0;
+  border-bottom: 1px solid var(--border);
+}
+.cal-cell {
+  position: relative; aspect-ratio: 1 / 1;
+  display: flex; flex-direction: column; align-items: center;
+  padding-top: 5px;
+  border-radius: var(--radius-sm); cursor: pointer;
+  border: 1px solid transparent;
+  transition: background .12s;
+}
+.cal-cell:hover { background: var(--surface2); }
+.cal-cell.other { opacity: 0.28; }
+.cal-cell-num { font-size: 12px; font-family: var(--mono); color: var(--text); line-height: 1; }
+.cal-cell.we .cal-cell-num { color: var(--red); }
+.cal-cell.today { background: var(--accent-bg); }
+.cal-cell.today .cal-cell-num { color: var(--accent-text); font-weight: 700; }
+.cal-cell.sel { border-color: var(--accent); }
+.cal-dots { display: flex; gap: 2px; margin-top: 4px; min-height: 4px; }
+.cal-dot { width: 4px; height: 4px; border-radius: 50%; }
+
+/* — selected day agenda — */
+.cal-day-panel { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.cal-day-head { display: flex; align-items: center; gap: 8px; padding: 9px 12px 7px; }
+.cal-day-title { flex: 1; font-size: 12px; font-weight: 600; text-transform: capitalize; }
+.cal-add-btn { width: 28px; height: 28px; padding: 0; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.cal-add-form { display: none; flex-direction: column; gap: 7px; padding: 0 12px 10px; }
+.cal-add-form.open { display: flex; }
+.cal-form-row { display: flex; gap: 6px; align-items: center; }
+.cal-form-row input[type=text] { flex: 1; min-width: 0; }
+.cal-form-row input[type=time] { width: 104px; flex-shrink: 0; }
+.cal-color-row { display: flex; gap: 7px; align-items: center; }
+.cal-sw { width: 20px; height: 20px; border-radius: 50%; cursor: pointer; border: 2px solid transparent; transition: border-color .12s; }
+.cal-sw.sel { border-color: var(--text); }
+.cal-form-actions { display: flex; gap: 6px; justify-content: flex-end; }
+
+.cal-day-events { flex: 1; overflow-y: auto; padding: 0 12px 12px; }
+.cal-day-events::-webkit-scrollbar { width: 3px; }
+.cal-day-events::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }
+.cal-ev {
+  display: flex; align-items: flex-start; gap: 8px;
+  padding: 7px 9px; margin-bottom: 4px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-left: 3px solid var(--blue); border-radius: var(--radius);
+}
+.cal-ev-time { font-size: 10px; font-family: var(--mono); color: var(--text3); width: 36px; flex-shrink: 0; padding-top: 1px; }
+.cal-ev-title { flex: 1; font-size: 12px; min-width: 0; word-break: break-word; }
+.cal-ev-del { opacity: 0; color: var(--text3); cursor: pointer; font-size: 14px; background: none; border: none; padding: 0; line-height: 1; transition: opacity .12s, color .12s; }
+.cal-ev:hover .cal-ev-del { opacity: 1; }
+.cal-ev-del:hover { color: var(--red); }
+.cal-ev.bday { border-left-color: #d98fb0; }
+.cal-ev.bday .cal-ev-time { color: #d98fb0; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
 /* ══════════════════════════════
@@ -1462,8 +1724,9 @@ input[type=number]:focus { border-color: var(--accent); }
   <button class="nav-logo" id="openWindowBtn" title="Открыть портал в основном окне"><i class="ti ti-arrow-up-right"></i></button>
   <button class="nav-btn active" data-panel="todo" title="Задачи"><i class="ti ti-checkbox"></i></button>
   <button class="nav-btn" data-panel="finance" title="Финансы"><i class="ti ti-wallet"></i></button>
-  <button class="nav-btn" data-panel="birthdays" title="Дни рождения"><i class="ti ti-cake"></i></button>
-  <button class="nav-btn" data-panel="calendar" title="Календарь"><i class="ti ti-calendar"></i></button>
+  <button class="nav-btn" data-panel="birthdays" title="События"><i class="ti ti-bell"></i></button>
+  <!-- Календарь скрыт до готовности (пока localStorage-MVP) -->
+  <button class="nav-btn" data-panel="calendar" title="Календарь" style="display:none"><i class="ti ti-calendar"></i></button>
   <button class="nav-btn" data-panel="garage" title="Гараж"><i class="ti ti-car"></i></button>
   <button class="nav-btn" data-panel="notes" title="Заметки"><i class="ti ti-notes"></i></button>
   <div class="nav-spacer"></div>
@@ -1551,33 +1814,138 @@ input[type=number]:focus { border-color: var(--accent); }
     </div>
   </div>
 
-  <!-- ── BIRTHDAYS ── -->
-  <div class="panel" id="panel-birthdays">
+  <!-- ── EVENTS (бывш. Дни рождения) ── -->
+  <div class="panel" id="panel-birthdays" data-screen-label="События">
     <div class="panel-header">
-      <i class="ti ti-cake" style="color:var(--accent)"></i>
-      <span class="panel-title">Дни рождения</span>
+      <i class="ti ti-bell" id="evtHeadIcon" style="color:var(--accent)"></i>
+      <span class="panel-title" id="evtTitle">События</span>
+      <button class="icon-btn" id="evtAddToggle" title="Добавить событие"><i class="ti ti-plus"></i></button>
+      <span class="conn-dot offline" id="evt-conn" title=""></span>
     </div>
-    <div class="bday-add">
-      <div class="todo-add-row">
-        <input type="text" id="bdayName" placeholder="Имя…" style="flex:1" maxlength="100">
-        <input type="date" id="bdayDate" style="flex:1">
-        <button class="btn-primary" id="addBdayBtn">+</button>
+
+    <!-- основной вид: гармошка-форма + фильтр + список -->
+    <div class="evt-view" id="evtMainView">
+      <!-- единая форма (гармошка, скрыта по умолчанию) -->
+      <div class="evt-accordion" id="evtAddForm">
+        <div class="evt-form-inner">
+
+          <!-- шаблон -->
+          <div class="evt-tpl-row">
+            <select id="evtTemplate" class="bday-sel" style="flex:1" title="Создать из шаблона">
+              <option value="">— без шаблона —</option>
+            </select>
+            <button class="icon-btn" id="evtTplDel" title="Удалить этот шаблон" style="display:none"><i class="ti ti-trash"></i></button>
+            <button class="icon-btn" id="evtTplSave" title="Сохранить текущие настройки как шаблон"><i class="ti ti-bookmark-plus"></i></button>
+          </div>
+
+          <input type="text" id="evtName" placeholder="Название / примечание…" maxlength="120">
+
+          <!-- режим повторения -->
+          <div class="evt-seg" id="evtRecurSeg">
+            <button type="button" class="evt-seg-btn active" data-recur="yearly">Раз в год</button>
+            <button type="button" class="evt-seg-btn" data-recur="daily">По дням</button>
+          </div>
+
+          <!-- цвет метки -->
+          <div class="evt-field-row">
+            <span class="evt-flabel">Цвет метки</span>
+            <div class="cal-color-row" id="evtColorRow"></div>
+          </div>
+
+          <!-- ── РАЗ В ГОД ── -->
+          <div class="evt-mode-fields" id="evtYearlyRow">
+            <div class="bday-add-row">
+              <input type="text" id="evtDMM" class="bday-dmm" placeholder="дд.мм" inputmode="numeric" maxlength="5" title="День и месяц, напр. 15.09">
+              <input type="number" id="evtYear" class="bday-year" placeholder="год" min="1900" max="2100" title="Год — можно не указывать">
+            </div>
+            <div class="evt-field-row">
+              <span class="evt-flabel">Начать оповещать за</span>
+              <input type="number" id="evtLeadDays" class="evt-num" min="0" max="365" value="7">
+              <span class="evt-funit">дн. до события</span>
+            </div>
+            <label class="evt-check">
+              <input type="checkbox" id="evtLeadDaily" checked>
+              <span>Напоминать раз в сутки до события, в</span>
+              <input type="time" id="evtLeadTime" class="evt-time" value="12:00">
+            </label>
+            <div class="evt-field-row">
+              <span class="evt-flabel">В день события — с</span>
+              <input type="time" id="evtAtYearly" class="evt-time" value="09:00">
+            </div>
+          </div>
+
+          <!-- ── ПО ДНЯМ ── -->
+          <div class="evt-mode-fields" id="evtDailyRow" style="display:none">
+            <div class="evt-wd-row">
+              <span class="evt-wd-hint">Дни недели (пусто — каждый день):</span>
+              <div class="evt-wd-chips" id="evtWeekdaysChips"></div>
+            </div>
+            <div class="evt-field-row">
+              <span class="evt-flabel">Время оповещения</span>
+              <input type="time" id="evtAtDaily" class="evt-time" value="09:00">
+            </div>
+          </div>
+
+          <!-- серия оповещений в ТГ (обе ветки) -->
+          <div class="evt-field-row evt-burst-row">
+            <span class="evt-flabel">Прислать в ТГ</span>
+            <input type="number" id="evtBurstCount" class="evt-num" min="1" max="10" value="1">
+            <span class="evt-funit">раз, каждые</span>
+            <input type="number" id="evtBurstInterval" class="evt-num" min="0" max="1440" value="0">
+            <span class="evt-funit">мин</span>
+          </div>
+
+          <div class="evt-preview" id="evtPreview"></div>
+
+          <div class="evt-form-actions">
+            <button class="btn-ghost" id="evtAddCancel">Отмена</button>
+            <button class="btn-primary" id="addEvtBtn">Добавить</button>
+          </div>
+        </div>
       </div>
+
+      <!-- фильтр -->
+      <div class="evt-filter" id="evtFilter">
+        <button class="evt-filter-btn active" data-filter="all">Все</button>
+        <button class="evt-filter-btn" data-filter="yearly">Годовые</button>
+        <button class="evt-filter-btn" data-filter="daily">По дням</button>
+      </div>
+
+      <div class="panel-body" id="evtList"></div>
     </div>
-    <div class="panel-body" id="bdayList"></div>
   </div>
 
   <!-- ── CALENDAR ── -->
-  <div class="panel" id="panel-calendar">
+  <div class="panel" id="panel-calendar" data-screen-label="Календарь">
     <div class="panel-header">
       <i class="ti ti-calendar" style="color:var(--accent)"></i>
       <span class="panel-title">Календарь</span>
-      <button class="cal-sync-btn" id="calSyncBtn">
-        <i class="ti ti-refresh"></i> Синхронизировать
-      </button>
+      <button class="icon-btn" id="calTodayBtn" title="К сегодня"><i class="ti ti-calendar-event"></i></button>
     </div>
-    <div class="panel-body" id="calList">
-      <div class="empty">Нет событий.<br>Нажмите «Синхронизировать»</div>
+    <div class="cal-nav">
+      <button class="cal-nav-btn" id="calPrev" title="Предыдущий месяц"><i class="ti ti-chevron-left"></i></button>
+      <div class="cal-month" id="calMonthLabel">—</div>
+      <button class="cal-nav-btn" id="calNext" title="Следующий месяц"><i class="ti ti-chevron-right"></i></button>
+    </div>
+    <div class="cal-grid-head" id="calWeekHead"></div>
+    <div class="cal-grid" id="calGrid"></div>
+    <div class="cal-day-panel">
+      <div class="cal-day-head">
+        <span class="cal-day-title" id="calDayTitle">—</span>
+        <button class="btn-primary cal-add-btn" id="calAddBtn" title="Добавить событие"><i class="ti ti-plus"></i></button>
+      </div>
+      <div class="cal-add-form" id="calAddForm">
+        <div class="cal-form-row">
+          <input type="text" id="calEvTitle" placeholder="Событие…" maxlength="120" autocomplete="off">
+          <input type="time" id="calEvTime">
+        </div>
+        <div class="cal-color-row" id="calColorRow"></div>
+        <div class="cal-form-actions">
+          <button class="btn-ghost" id="calEvCancel">Отмена</button>
+          <button class="btn-primary" id="calEvSave">Добавить</button>
+        </div>
+      </div>
+      <div class="cal-day-events" id="calDayEvents"></div>
     </div>
   </div>
 
@@ -1711,17 +2079,7 @@ input[type=number]:focus { border-color: var(--accent); }
         <div class="setting-test-result" id="webhookResult"></div>
       </div>
 
-      <div class="settings-group-label"><i class="ti ti-bell"></i> Напоминания</div>
-
-      <div class="setting-field">
-        <label class="setting-label" for="set_birthday_reminder_days">Напоминать о ДР за, дней</label>
-        <div class="setting-desc">За сколько дней до дня рождения присылать напоминание</div>
-        <div class="setting-row">
-          <input type="number" id="set_birthday_reminder_days" data-key="birthday_reminder_days"
-                 min="0" max="365" step="1" placeholder="7" style="width:90px" autocomplete="off">
-          <button class="btn-primary setting-save" data-key="birthday_reminder_days">Сохранить</button>
-        </div>
-      </div>
+      <div class="settings-group-label"><i class="ti ti-adjustments"></i> Прочее</div>
 
       <div class="setting-field">
         <label class="setting-label" for="set_timezone">Часовой пояс</label>
@@ -1919,12 +2277,15 @@ let state = {
   tasks: DB.get('tasks') || [],
   finance: DB.get('finance') || { months: {} },
   birthdays: DB.get('birthdays') || [],
+  eventTemplates: DB.get('eventTemplates') || [],
+  events: DB.get('events') || [],
   vehicles: DB.get('vehicles') || [],
   services: DB.get('services') || [],
   projects: DB.get('projects') || [],
   notes: DB.get('notes') || [],
   tags: DB.get('tags') || [],
   calendar: DB.get('calendar') || [],
+  calEvents: DB.get('calEvents') || [],
   currentMonth: new Date().toISOString().slice(0, 7),
   currentVehicle: null,
   currentProject: null,
@@ -2655,139 +3016,696 @@ async function softRefresh() {
 setInterval(softRefresh, 5 * 60 * 1000);
 
 // ══════════════════════════════════════════
-//  BIRTHDAYS
+//  EVENTS — оповещалка (БД-модуль; localStorage — кэш для офлайн-показа)
+//  Типы (срок оповещения) → события. Оповещение активно, когда до события
+//  осталось ≤ notify_days его типа; снимается вручную (acked_year по году
+//  наступления, на след. год возвращается). Алертинг (Telegram) — отд. фаза.
 // ══════════════════════════════════════════
-function daysUntilBirthday(dateStr) {
-  const now = new Date();
-  const parts = dateStr.split('-');
-  let bday = new Date(now.getFullYear(), parseInt(parts[1]) - 1, parseInt(parts[2]));
-  if (bday < now) bday.setFullYear(now.getFullYear() + 1);
-  return Math.round((bday - now) / 86400000);
+let eventsOnline = false;
+const EVT_COLORS = { blue: 'var(--blue)', green: 'var(--accent)', yellow: 'var(--yellow)', red: 'var(--red)', pink: '#d98fb0' };
+const EVT_COLOR_KEYS = ['blue', 'green', 'yellow', 'red', 'pink'];
+const EVT_MAX_DAY = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];   // 29.02 допускаем
+const EVT_BURST_MAX = 10;
+const EVT_WD = ['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота', 'Воскресенье'];
+const EVT_WD_SHORT = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
+let evtRecur = 'yearly';
+let evtNewColor = 'blue';
+let evtPickedWeekdays = new Set();
+let evtFilter = 'all';
+
+function evtColor(k) { return EVT_COLORS[k] || EVT_COLORS.blue; }
+function ymd(d) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; }
+function evtPlural(n, one, few, many) {
+  const m10 = n % 10, m100 = n % 100;
+  if (m10 === 1 && m100 !== 11) return one;
+  if (m10 >= 2 && m10 <= 4 && (m100 < 10 || m100 >= 20)) return few;
+  return many;
 }
+function clampInt(v, lo, hi, def) { let n = parseInt(v); if (isNaN(n)) return def; return Math.max(lo, Math.min(hi, n)); }
 
-function renderBirthdays() {
-  const el = document.getElementById('bdayList');
-  if (!state.birthdays.length) { el.innerHTML = '<div class="empty">Нет записей</div>'; return; }
-  const sorted = [...state.birthdays].sort((a, b) => daysUntilBirthday(a.date) - daysUntilBirthday(b.date));
-  el.innerHTML = '';
-
-  let shownUpcoming = false, shownOthers = false;
-  sorted.forEach(b => {
-    const days = daysUntilBirthday(b.date);
-    const isToday = days === 0;
-    const isSoon = days <= 7 && days > 0;
-
-    if (!shownUpcoming && (isToday || isSoon)) {
-      const lbl = document.createElement('div');
-      lbl.className = 'section-label'; lbl.textContent = 'Скоро';
-      el.appendChild(lbl); shownUpcoming = true;
+// дата следующего наступления (Date), с учётом режима
+function nextOccurrence(ev) {
+  const now = new Date(); now.setHours(0, 0, 0, 0);
+  if (ev.recur === 'daily') {
+    const wds = ev.weekdays && ev.weekdays.length ? ev.weekdays : null;
+    if (!wds) return new Date(now);
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(now); d.setDate(now.getDate() + i);
+      if (wds.includes((d.getDay() + 6) % 7)) return d;
     }
-    if (!shownOthers && !isToday && !isSoon) {
-      const lbl = document.createElement('div');
-      lbl.className = 'section-label'; lbl.textContent = 'Предстоящие';
-      el.appendChild(lbl); shownOthers = true;
-    }
+    return new Date(now);
+  }
+  let d = new Date(now.getFullYear(), ev.month - 1, ev.day);
+  if (d < now) d.setFullYear(now.getFullYear() + 1);
+  return d;
+}
+function evtDaysUntil(ev) {
+  const now = new Date(); now.setHours(0, 0, 0, 0);
+  return Math.round((nextOccurrence(ev) - now) / 86400000);
+}
+function evtOccKey(ev) {
+  if (ev.recur === 'yearly') return String(nextOccurrence(ev).getFullYear());
+  return ymd(nextOccurrence(ev));
+}
+// за сколько дней до события оповещение становится активным
+function evtLead(ev) { return ev.recur === 'yearly' ? (ev.lead_days || 0) : 0; }
+function evtDailyDaysText(ev) {
+  if (ev.recur === 'daily' && ev.weekdays && ev.weekdays.length) {
+    return ev.weekdays.slice().sort((a, b) => a - b).map(i => EVT_WD_SHORT[i]).join(', ');
+  }
+  return 'каждый день';
+}
+function evtBurstText(bc, bi) {
+  if (bc <= 1) return '1 уведомление';
+  if (!bi) return `${bc} ${evtPlural(bc, 'уведомление', 'уведомления', 'уведомлений')} подряд`;
+  return `${bc} ${evtPlural(bc, 'раз', 'раза', 'раз')} каждые ${bi} мин`;
+}
+function evtRecurLabel(ev) {
+  if (ev.recur === 'daily') return evtDailyDaysText(ev) + (ev.at_time ? ` в ${ev.at_time}` : '');
+  return null;
+}
+function evtDateLabel(ev) {
+  if (ev.recur === 'daily') return evtDailyDaysText(ev) + (ev.at_time ? ` · ${ev.at_time}` : '');
+  return new Date(2000, ev.month - 1, ev.day).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' }) + (ev.at_time ? ` · ${ev.at_time}` : '');
+}
+function cacheEvents() { DB.set('events', state.events); DB.set('eventTemplates', state.eventTemplates); }
 
-    const div = document.createElement('div');
-    div.className = 'birthday-item' + (isToday ? ' today' : isSoon ? ' soon' : '');
-
-    const initials = b.name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
-    const parts = b.date.split('-');
-    const dateLabel = new Date(2000, parseInt(parts[1]) - 1, parseInt(parts[2])).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' });
-    const age = new Date().getFullYear() - parseInt(parts[0]);
-
-    let daysLabel, daysClass;
-    if (isToday) { daysLabel = '🎉 Сегодня!'; daysClass = 'today-badge'; }
-    else if (isSoon) { daysLabel = `${days} дн.`; daysClass = 'soon-badge'; }
-    else { daysLabel = `${days} дн.`; daysClass = ''; }
-
-    div.innerHTML = `
-      <div class="birthday-avatar">${initials}</div>
-      <div class="birthday-info">
-        <div class="birthday-name">${b.name}</div>
-        <div class="birthday-date">${dateLabel}${parts[0] !== '0000' ? ` · исполнится ${age}` : ''}</div>
-      </div>
-      <div class="birthday-days ${daysClass}">${daysLabel}</div>
-    `;
-
-    const del = document.createElement('button');
-    del.className = 'task-del';
-    del.innerHTML = '<i class="ti ti-x"></i>';
-    del.style.opacity = '0';
-    div.addEventListener('mouseenter', () => del.style.opacity = '1');
-    div.addEventListener('mouseleave', () => del.style.opacity = '0');
-    del.onclick = () => { state.birthdays = state.birthdays.filter(x => x.id !== b.id); save('birthdays'); renderBirthdays(); };
-    div.appendChild(del);
-    el.appendChild(div);
+function updateEvtStatus() {
+  const d = document.getElementById('evt-conn');
+  if (d) {
+    d.className = 'conn-dot ' + (eventsOnline ? 'online' : 'offline');
+    d.title = eventsOnline ? 'Подключено к БД' : 'Нет связи с БД — только просмотр';
+  }
+  ['evtName', 'evtDMM', 'evtYear', 'evtLeadDays', 'evtLeadDaily', 'evtLeadTime', 'evtAtYearly', 'evtAtDaily', 'evtBurstCount', 'evtBurstInterval', 'evtTemplate', 'evtTplSave', 'addEvtBtn'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.disabled = !eventsOnline;
   });
 }
 
-document.getElementById('addBdayBtn').onclick = () => {
-  const name = document.getElementById('bdayName').value.trim();
-  const date = document.getElementById('bdayDate').value;
-  if (!name || !date) return;
-  state.birthdays.push({ id: uid(), name, date });
-  save('birthdays');
-  document.getElementById('bdayName').value = '';
-  document.getElementById('bdayDate').value = '';
-  renderBirthdays();
+async function loadEvents() {
+  try {
+    const data = await apiFetch('/events/bootstrap');
+    state.events = data.events || [];
+    state.eventTemplates = data.templates || [];
+    eventsOnline = true;
+    cacheEvents();
+  } catch (e) {
+    eventsOnline = false;
+    state.events = DB.get('events') || [];
+    state.eventTemplates = DB.get('eventTemplates') || [];
+  }
+  updateEvtStatus();
+  renderTemplateSelect();
+  renderEvents();
+  if (typeof renderCalendar === 'function') renderCalendar();
+}
+
+// ── мутации событий ──
+async function addEventRow(payload) {
+  const row = await apiFetch('/events', { method: 'POST', headers: JH, body: JSON.stringify(payload) });
+  state.events.push(row); cacheEvents(); renderEvents();
+  if (typeof renderCalendar === 'function') renderCalendar();
+}
+async function patchEventRow(id, patch) {
+  const row = await apiFetch('/events/' + id, { method: 'PATCH', headers: JH, body: JSON.stringify(patch) });
+  const i = state.events.findIndex(e => e.id === id); if (i >= 0) state.events[i] = row;
+  cacheEvents(); renderEvents();
+  if (typeof renderCalendar === 'function') renderCalendar();
+}
+async function removeEventRow(id) {
+  await apiFetch('/events/' + id, { method: 'DELETE' });
+  state.events = state.events.filter(e => e.id !== id); cacheEvents(); renderEvents();
+  if (typeof renderCalendar === 'function') renderCalendar();
+}
+async function evtConfirmDelete(ev) {
+  if (!eventsOnline) return;
+  if (!await confirmDialog({ title: 'Удалить событие', message: `Удалить событие «${ev.name}»?`, okText: 'Удалить', danger: true })) return;
+  removeEventRow(ev.id);
+}
+
+// ── мутации шаблонов ──
+async function addTemplate(payload) {
+  const row = await apiFetch('/event-templates', { method: 'POST', headers: JH, body: JSON.stringify(payload) });
+  state.eventTemplates.push(row); cacheEvents(); renderTemplateSelect(); return row;
+}
+async function removeTemplate(id) {
+  await apiFetch('/event-templates/' + id, { method: 'DELETE' });
+  state.eventTemplates = state.eventTemplates.filter(t => t.id !== id);
+  cacheEvents(); renderTemplateSelect();
+}
+
+// ── рендер списка ──
+function evtSection(el, text) {
+  const l = document.createElement('div');
+  l.className = 'section-label'; l.textContent = text;
+  el.appendChild(l);
+}
+function updateEvtBadge() {
+  const colors = new Set(); let n = 0;
+  state.events.forEach(ev => {
+    if (evtDaysUntil(ev) <= evtLead(ev) && ev.acked_key !== evtOccKey(ev)) { n++; colors.add(evtColor(ev.color)); }
+  });
+  const btn = document.querySelector('.nav-btn[data-panel="birthdays"]');
+  if (!btn) return;
+  let b = btn.querySelector('.badge');
+  if (n > 0) {
+    if (!b) { b = document.createElement('span'); b.className = 'badge'; btn.appendChild(b); }
+    if (colors.size > 1) { b.className = 'badge evt-multi'; b.style.background = 'var(--red)'; }
+    else { b.className = 'badge'; b.style.background = [...colors][0] || 'var(--red)'; }
+    btn.title = 'События — оповещений: ' + n;
+  } else { if (b) b.remove(); btn.title = 'События'; }
+}
+function evtSub(ev) {
+  const days = evtDaysUntil(ev);
+  let s = days === 0 ? 'Сегодня' : (days === 1 ? 'Завтра' : `Через ${days} дн.`);
+  if (ev.recur === 'yearly' && ev.year) {
+    const age = nextOccurrence(ev).getFullYear() - ev.year;
+    s += ` · ${age} ${evtPlural(age, 'год', 'года', 'лет')}`;
+  } else { const rl = evtRecurLabel(ev); if (rl) s += ' · ' + rl; }
+  return s;
+}
+function evtCardDot(div, ev) { div.querySelector('.type-dot').style.background = evtColor(ev.color); }
+
+function evtAlertCard(ev) {
+  const div = document.createElement('div');
+  div.className = 'bday-alert';
+  div.innerHTML =
+    '<span class="type-dot"></span>' +
+    '<div class="bday-alert-info"><div class="bday-alert-name"></div><div class="evt-meta-row"></div></div>' +
+    '<button class="bday-congrats"><i class="ti ti-check"></i>Готово</button>' +
+    '<button class="evt-del" title="Удалить событие"><i class="ti ti-trash"></i></button>';
+  evtCardDot(div, ev);
+  div.querySelector('.bday-alert-name').textContent = ev.name;
+  const meta = div.querySelector('.evt-meta-row');
+  const sub = document.createElement('span'); sub.className = 'bday-alert-sub'; sub.textContent = evtSub(ev);
+  meta.appendChild(sub);
+  div.querySelector('.bday-congrats').onclick = () => { if (eventsOnline) patchEventRow(ev.id, { acked_key: evtOccKey(ev) }); };
+  div.querySelector('.evt-del').onclick = () => evtConfirmDelete(ev);
+  return div;
+}
+function evtDoneCard(ev) {
+  const div = document.createElement('div');
+  div.className = 'birthday-item done';
+  div.innerHTML =
+    '<span class="type-dot"></span>' +
+    '<div class="birthday-info"><div class="birthday-name"></div><div class="evt-meta-row"></div></div>' +
+    '<span class="bday-done-badge"><i class="ti ti-check"></i>Отмечено</span>' +
+    '<button class="bday-undo" title="Вернуть оповещение"><i class="ti ti-arrow-back-up"></i></button>' +
+    '<button class="evt-del" title="Удалить событие"><i class="ti ti-trash"></i></button>';
+  evtCardDot(div, ev);
+  div.querySelector('.birthday-name').textContent = ev.name;
+  const meta = div.querySelector('.evt-meta-row');
+  const sub = document.createElement('span'); sub.className = 'birthday-date'; sub.textContent = evtDateLabel(ev);
+  meta.appendChild(sub);
+  div.querySelector('.bday-undo').onclick = () => { if (eventsOnline) patchEventRow(ev.id, { acked_key: null }); };
+  div.querySelector('.evt-del').onclick = () => evtConfirmDelete(ev);
+  return div;
+}
+function evtItem(ev) {
+  const days = evtDaysUntil(ev);
+  const div = document.createElement('div');
+  div.className = 'birthday-item';
+  div.innerHTML =
+    '<span class="type-dot"></span>' +
+    '<div class="birthday-info"><div class="birthday-name"></div><div class="evt-meta-row"></div></div>' +
+    '<div class="birthday-days"></div>' +
+    '<button class="task-del" style="opacity:0"><i class="ti ti-x"></i></button>';
+  evtCardDot(div, ev);
+  div.querySelector('.birthday-name').textContent = ev.name;
+  const meta = div.querySelector('.evt-meta-row');
+  const dateSpan = document.createElement('span'); dateSpan.className = 'birthday-date';
+  dateSpan.textContent = evtDateLabel(ev) + (ev.recur === 'yearly' && ev.year ? ` · ${nextOccurrence(ev).getFullYear() - ev.year} ${evtPlural(nextOccurrence(ev).getFullYear() - ev.year, 'год', 'года', 'лет')}` : '');
+  meta.appendChild(dateSpan);
+  div.querySelector('.birthday-days').textContent = days === 1 ? 'завтра' : days + ' дн.';
+  const del = div.querySelector('.task-del');
+  div.addEventListener('mouseenter', () => del.style.opacity = '1');
+  div.addEventListener('mouseleave', () => del.style.opacity = '0');
+  del.onclick = () => evtConfirmDelete(ev);
+  return div;
+}
+function renderEvents() {
+  const el = document.getElementById('evtList');
+  if (!el) return;
+  updateEvtBadge();
+  if (!state.events.length) { el.innerHTML = '<div class="empty">Нет событий.<br>Добавьте через «+» вверху.</div>'; return; }
+  const pass = ev => evtFilter === 'all'
+    || (evtFilter === 'yearly' && ev.recur === 'yearly')
+    || (evtFilter === 'daily' && ev.recur !== 'yearly');
+  const active = [], acked = [], upcoming = [];
+  state.events.filter(pass).forEach(ev => {
+    const lead = evtLead(ev); const days = evtDaysUntil(ev);
+    if (days <= lead) (ev.acked_key === evtOccKey(ev) ? acked : active).push(ev);
+    else upcoming.push(ev);
+  });
+  const byDays = (a, b) => evtDaysUntil(a) - evtDaysUntil(b);
+  active.sort(byDays); acked.sort(byDays); upcoming.sort(byDays);
+  if (!active.length && !acked.length && !upcoming.length) { el.innerHTML = '<div class="empty">Нет событий в этом фильтре.</div>'; return; }
+  el.innerHTML = '';
+  if (active.length || acked.length) {
+    evtSection(el, 'Оповещения');
+    active.forEach(ev => el.appendChild(evtAlertCard(ev)));
+    acked.forEach(ev => el.appendChild(evtDoneCard(ev)));
+  }
+  if (upcoming.length) {
+    evtSection(el, 'Предстоящие');
+    upcoming.forEach(ev => el.appendChild(evtItem(ev)));
+  }
+}
+
+// ── шаблоны: select / применение ──
+function renderTemplateSelect() {
+  const sel = document.getElementById('evtTemplate');
+  if (!sel) return;
+  const prev = sel.value;
+  sel.innerHTML = '<option value="">— без шаблона —</option>';
+  state.eventTemplates.forEach(t => {
+    const o = document.createElement('option'); o.value = t.id; o.textContent = t.title; sel.appendChild(o);
+  });
+  if (prev && state.eventTemplates.some(t => t.id === prev)) sel.value = prev;
+  else { sel.value = ''; const del = document.getElementById('evtTplDel'); if (del) del.style.display = 'none'; }
+}
+function applyTemplate(t) {
+  evtRecur = t.recur === 'daily' ? 'daily' : 'yearly';
+  setEvtColor(t.color);
+  document.getElementById('evtBurstCount').value = t.burst_count || 1;
+  document.getElementById('evtBurstInterval').value = t.burst_interval_min || 0;
+  if (t.recur === 'daily') {
+    setEvtWeekdays(t.weekdays || []);
+    if (t.at_time) document.getElementById('evtAtDaily').value = t.at_time;
+  } else {
+    document.getElementById('evtLeadDays').value = t.lead_days || 0;
+    document.getElementById('evtLeadDaily').checked = !!t.lead_daily;
+    document.getElementById('evtLeadTime').value = t.lead_time || '12:00';
+    if (t.at_time) document.getElementById('evtAtYearly').value = t.at_time;
+  }
+  applyEvtRecurFields();
+}
+
+// ── цвет метки ──
+function setEvtColor(k) {
+  evtNewColor = EVT_COLOR_KEYS.includes(k) ? k : 'blue';
+  const row = document.getElementById('evtColorRow');
+  if (row) row.querySelectorAll('.cal-sw').forEach(x => x.classList.toggle('sel', x.dataset.c === evtNewColor));
+}
+(function () {
+  const row = document.getElementById('evtColorRow');
+  if (!row) return;
+  EVT_COLOR_KEYS.forEach(k => {
+    const sw = document.createElement('div');
+    sw.className = 'cal-sw' + (k === evtNewColor ? ' sel' : '');
+    sw.style.background = evtColor(k); sw.dataset.c = k;
+    sw.onclick = () => setEvtColor(k);
+    row.appendChild(sw);
+  });
+})();
+
+// ── чипы дней недели (мультивыбор; пусто = каждый день) ──
+function setEvtWeekdays(arr) {
+  evtPickedWeekdays = new Set((arr || []).map(Number));
+  document.querySelectorAll('#evtWeekdaysChips .evt-wd-chip').forEach(c => c.classList.toggle('on', evtPickedWeekdays.has(+c.dataset.wd)));
+}
+function resetEvtWeekdays() { setEvtWeekdays([]); }
+(function () {
+  const wrap = document.getElementById('evtWeekdaysChips');
+  if (!wrap) return;
+  EVT_WD_SHORT.forEach((lbl, i) => {
+    const c = document.createElement('button');
+    c.type = 'button'; c.className = 'evt-wd-chip'; c.textContent = lbl; c.dataset.wd = i;
+    c.onclick = () => {
+      if (evtPickedWeekdays.has(i)) { evtPickedWeekdays.delete(i); c.classList.remove('on'); }
+      else { evtPickedWeekdays.add(i); c.classList.add('on'); }
+      updateEvtPreview();
+    };
+    wrap.appendChild(c);
+  });
+})();
+
+// ── автоподстановка точки после дня (15 → 15.) ──
+document.getElementById('evtDMM').addEventListener('input', (e) => {
+  let v = e.target.value.replace(/[^\d.]/g, '');
+  if (/^\d{2}$/.test(v)) v = v + '.';
+  e.target.value = v.slice(0, 5);
+  e.target.classList.remove('invalid');
+  updateEvtPreview();
+});
+
+// ── чтение формы → payload ──
+function readEvtForm() {
+  const payload = {
+    name: document.getElementById('evtName').value.trim(),
+    recur: evtRecur,
+    color: evtNewColor,
+    burst_count: clampInt(document.getElementById('evtBurstCount').value, 1, EVT_BURST_MAX, 1),
+    burst_interval_min: clampInt(document.getElementById('evtBurstInterval').value, 0, 1440, 0),
+  };
+  if (evtRecur === 'yearly') {
+    const at = document.getElementById('evtAtYearly').value; if (at) payload.at_time = at;
+    payload.lead_days = clampInt(document.getElementById('evtLeadDays').value, 0, 365, 0);
+    payload.lead_daily = document.getElementById('evtLeadDaily').checked;
+    payload.lead_time = document.getElementById('evtLeadTime').value || '12:00';
+  } else {
+    const at = document.getElementById('evtAtDaily').value; if (at) payload.at_time = at;
+    if (evtPickedWeekdays.size) payload.weekdays = [...evtPickedWeekdays].sort((a, b) => a - b);
+  }
+  return payload;
+}
+
+// ── живой превью ──
+function updateEvtPreview() {
+  const el = document.getElementById('evtPreview');
+  if (!el) return;
+  const bc = clampInt(document.getElementById('evtBurstCount').value, 1, EVT_BURST_MAX, 1);
+  const bi = clampInt(document.getElementById('evtBurstInterval').value, 0, 1440, 0);
+  const burst = evtBurstText(bc, bi);
+  let html = '';
+  if (evtRecur === 'yearly') {
+    const at = document.getElementById('evtAtYearly').value || '09:00';
+    const lead = clampInt(document.getElementById('evtLeadDays').value, 0, 365, 0);
+    const daily = document.getElementById('evtLeadDaily').checked;
+    const lt = document.getElementById('evtLeadTime').value || '12:00';
+    const parts = [];
+    if (lead > 0) {
+      if (daily) parts.push(`За <b>${lead} ${evtPlural(lead, 'день', 'дня', 'дней')}</b> — напоминание каждый день в <b>${lt}</b>`);
+      else parts.push(`Напоминание за <b>${lead} ${evtPlural(lead, 'день', 'дня', 'дней')}</b> в <b>${lt}</b>`);
+    }
+    parts.push(`В день события с <b>${at}</b> — ${burst}`);
+    html = parts.join('. ') + '.';
+  } else {
+    const at = document.getElementById('evtAtDaily').value || '09:00';
+    const days = evtPickedWeekdays.size ? [...evtPickedWeekdays].sort((a, b) => a - b).map(i => EVT_WD_SHORT[i]).join(', ') : 'каждый день';
+    html = `<b>${days}</b> в <b>${at}</b> — ${burst}.`;
+  }
+  el.innerHTML = html;
+}
+
+// ── режим (segmented) ──
+function applyEvtRecurFields() {
+  document.getElementById('evtYearlyRow').style.display = evtRecur === 'yearly' ? 'flex' : 'none';
+  document.getElementById('evtDailyRow').style.display = evtRecur === 'daily' ? 'flex' : 'none';
+  document.querySelectorAll('#evtRecurSeg .evt-seg-btn').forEach(b => b.classList.toggle('active', b.dataset.recur === evtRecur));
+  updateEvtPreview();
+}
+document.querySelectorAll('#evtRecurSeg .evt-seg-btn').forEach(btn => {
+  btn.onclick = () => { evtRecur = btn.dataset.recur; applyEvtRecurFields(); };
+});
+
+// ── превью при изменении любого поля ──
+['evtLeadDays', 'evtLeadTime', 'evtAtYearly', 'evtAtDaily', 'evtBurstCount', 'evtBurstInterval'].forEach(id => {
+  const el = document.getElementById(id); if (el) el.addEventListener('input', updateEvtPreview);
+});
+document.getElementById('evtLeadDaily').addEventListener('change', updateEvtPreview);
+
+// ── добавление события ──
+document.getElementById('addEvtBtn').onclick = async () => {
+  if (!eventsOnline) return;
+  const nameEl = document.getElementById('evtName');
+  const name = nameEl.value.trim();
+  if (!name) { nameEl.focus(); return; }
+  const payload = readEvtForm();
+  const dmmEl = document.getElementById('evtDMM');
+  dmmEl.classList.remove('invalid');
+  if (evtRecur === 'yearly') {
+    const mt = dmmEl.value.trim().match(/^(\d{1,2})[.\/](\d{1,2})$/);
+    if (!mt) { dmmEl.classList.add('invalid'); return; }
+    const d = +mt[1], m = +mt[2];
+    if (m < 1 || m > 12 || d < 1 || d > EVT_MAX_DAY[m - 1]) { dmmEl.classList.add('invalid'); return; }
+    const yRaw = document.getElementById('evtYear').value.trim();
+    payload.day = d; payload.month = m;
+    payload.year = yRaw && +yRaw >= 1900 && +yRaw <= 2100 ? +yRaw : null;
+  }
+  const btn = document.getElementById('addEvtBtn');
+  btn.disabled = true;
+  try {
+    await addEventRow(payload);
+    resetEvtForm();
+    closeEvtForm();
+  } catch (e) {
+    if (evtRecur === 'yearly') dmmEl.classList.add('invalid');
+  } finally {
+    btn.disabled = !eventsOnline;
+  }
+};
+function resetEvtForm() {
+  document.getElementById('evtName').value = '';
+  const dmm = document.getElementById('evtDMM'); dmm.value = ''; dmm.classList.remove('invalid');
+  document.getElementById('evtYear').value = '';
+  resetEvtWeekdays();
+  const sel = document.getElementById('evtTemplate'); if (sel) sel.value = '';
+  document.getElementById('evtTplDel').style.display = 'none';
+  updateEvtPreview();
+}
+
+// ── шаблоны: обработчики ──
+document.getElementById('evtTemplate').onchange = (e) => {
+  const id = e.target.value;
+  document.getElementById('evtTplDel').style.display = id ? '' : 'none';
+  const t = state.eventTemplates.find(x => x.id === id);
+  if (t) applyTemplate(t);
+};
+document.getElementById('evtTplDel').onclick = async () => {
+  if (!eventsOnline) return;
+  const id = document.getElementById('evtTemplate').value;
+  const t = state.eventTemplates.find(x => x.id === id);
+  if (!t) return;
+  if (!await confirmDialog({ title: 'Удалить шаблон', message: `Удалить шаблон «${t.title}»?\nСозданные по нему события не изменятся.`, okText: 'Удалить', danger: true })) return;
+  await removeTemplate(id);
+  resetEvtForm();
+};
+document.getElementById('evtTplSave').onclick = async () => {
+  if (!eventsOnline) return;
+  const title = await promptDialog({ title: 'Сохранить шаблон', placeholder: 'напр. День рождения', okText: 'Сохранить' });
+  if (title === null) return;
+  const name = String(title).trim();
+  if (!name) return;
+  const base = readEvtForm();
+  const payload = {
+    title: name, recur: base.recur, color: base.color,
+    burst_count: base.burst_count, burst_interval_min: base.burst_interval_min,
+    at_time: base.at_time || null,
+  };
+  if (base.recur === 'daily') payload.weekdays = base.weekdays || null;
+  else { payload.lead_days = base.lead_days; payload.lead_daily = base.lead_daily; payload.lead_time = base.lead_time; }
+  try {
+    const t = await addTemplate(payload);
+    document.getElementById('evtTemplate').value = t.id;
+    document.getElementById('evtTplDel').style.display = '';
+  } catch (e) {
+    confirmDialog({ title: 'Ошибка', message: 'Не удалось сохранить шаблон.', okText: 'Ок' });
+  }
 };
 
+// ── гармошка-форма ──
+function openEvtForm() {
+  if (!eventsOnline) return;
+  document.getElementById('evtAddForm').classList.add('open');
+  document.getElementById('evtAddToggle').classList.add('active');
+  updateEvtPreview();
+  document.getElementById('evtName').focus();
+}
+function closeEvtForm() {
+  document.getElementById('evtAddForm').classList.remove('open');
+  document.getElementById('evtAddToggle').classList.remove('active');
+}
+document.getElementById('evtAddToggle').onclick = () => {
+  document.getElementById('evtAddForm').classList.contains('open') ? closeEvtForm() : openEvtForm();
+};
+document.getElementById('evtAddCancel').onclick = closeEvtForm;
+
+// ── фильтр ──
+document.querySelectorAll('#evtFilter .evt-filter-btn').forEach(btn => {
+  btn.onclick = () => {
+    evtFilter = btn.dataset.filter;
+    document.querySelectorAll('#evtFilter .evt-filter-btn').forEach(b => b.classList.toggle('active', b === btn));
+    renderEvents();
+  };
+});
+
+applyEvtRecurFields();
+
 // ══════════════════════════════════════════
-//  CALENDAR (placeholder — sync from API)
+//  CALENDAR (MVP — события в localStorage)
 // ══════════════════════════════════════════
+const CAL_COLORS = { blue: 'var(--blue)', green: 'var(--accent)', yellow: 'var(--yellow)', red: 'var(--red)' };
+const CAL_BDAY_COLOR = '#d98fb0';
+const CAL_WEEKDAYS = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
+const CAL_MONTHS = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
+let calCursor = (() => { const d = new Date(); d.setDate(1); return d; })();
+let calSelected = today();
+let calNewColor = 'blue';
+
+function calPad(n) { return String(n).padStart(2, '0'); }
+function calKey(y, m, d) { return `${y}-${calPad(m + 1)}-${calPad(d)}`; }
+
+// календарь показывает годовые события (state.events: recur='yearly' с day/month)
+function calBirthdaysOn(mm, dd) {
+  return (state.events || [])
+    .filter(e => e.recur === 'yearly' && e.month === mm && e.day === dd)
+    .map(e => ({ name: e.name }));
+}
+
 function renderCalendar() {
-  const el = document.getElementById('calList');
-  if (!state.calendar.length) { el.innerHTML = '<div class="empty">Нет событий.<br>Нажмите «Синхронизировать»</div>'; return; }
+  const grid = document.getElementById('calGrid');
+  const head = document.getElementById('calWeekHead');
+  const label = document.getElementById('calMonthLabel');
+  if (!grid) return;
+  const y = calCursor.getFullYear(), m = calCursor.getMonth();
+  label.textContent = `${CAL_MONTHS[m]} ${y}`;
+
+  if (!head.childElementCount) {
+    CAL_WEEKDAYS.forEach((w, i) => {
+      const s = document.createElement('span');
+      s.textContent = w;
+      if (i >= 5) s.className = 'we';
+      head.appendChild(s);
+    });
+  }
+
+  const first = new Date(y, m, 1);
+  const lead = (first.getDay() + 6) % 7;            // понедельник = 0
+  const daysInMonth = new Date(y, m + 1, 0).getDate();
   const todayStr = today();
-  el.innerHTML = '';
-  const sorted = [...state.calendar].sort((a, b) => a.start.localeCompare(b.start));
 
-  let lastDate = '';
-  sorted.forEach(ev => {
-    const evDate = ev.start.slice(0, 10);
-    const isPast = evDate < todayStr;
-    const isToday = evDate === todayStr;
+  const byDate = {};
+  state.calEvents.forEach(e => { (byDate[e.date] = byDate[e.date] || []).push(e); });
 
-    if (evDate !== lastDate) {
-      const lbl = document.createElement('div');
-      lbl.className = 'section-label';
-      const d = new Date(evDate + 'T00:00:00');
-      lbl.textContent = isToday ? '— Сегодня —' : d.toLocaleDateString('ru-RU', { weekday: 'short', day: 'numeric', month: 'short' });
-      el.appendChild(lbl);
-      lastDate = evDate;
-    }
+  grid.innerHTML = '';
+  for (let i = 0; i < 42; i++) {
+    const dObj = new Date(y, m, i - lead + 1);       // авто-нормализация соседних месяцев
+    const ky = calKey(dObj.getFullYear(), dObj.getMonth(), dObj.getDate());
+    const dow = (dObj.getDay() + 6) % 7;
+    const cell = document.createElement('div');
+    cell.className = 'cal-cell';
+    if (dObj.getMonth() !== m) cell.classList.add('other');
+    if (dow >= 5) cell.classList.add('we');
+    if (ky === todayStr) cell.classList.add('today');
+    if (ky === calSelected) cell.classList.add('sel');
 
-    const div = document.createElement('div');
-    div.className = 'cal-event' + (isToday ? ' today-event' : '') + (isPast ? ' past-event' : '');
-    const time = ev.start.length > 10 ? ev.start.slice(11, 16) : 'весь день';
-    div.innerHTML = `
-      <div class="cal-time">${time}</div>
-      <div class="cal-body">
-        <div class="cal-title">${ev.title}</div>
-        ${ev.location ? `<div class="cal-meta"><i class="ti ti-map-pin" style="font-size:10px"></i> ${ev.location}</div>` : ''}
-      </div>
-    `;
-    el.appendChild(div);
+    const num = document.createElement('span');
+    num.className = 'cal-cell-num';
+    num.textContent = dObj.getDate();
+    cell.appendChild(num);
+
+    const dots = document.createElement('div');
+    dots.className = 'cal-dots';
+    const colors = (byDate[ky] || []).slice(0, 3).map(e => CAL_COLORS[e.color] || CAL_COLORS.blue);
+    if (calBirthdaysOn(dObj.getMonth() + 1, dObj.getDate()).length) colors.push(CAL_BDAY_COLOR);
+    colors.slice(0, 3).forEach(c => {
+      const dot = document.createElement('span');
+      dot.className = 'cal-dot';
+      dot.style.background = c;
+      dots.appendChild(dot);
+    });
+    cell.appendChild(dots);
+
+    cell.onclick = () => {
+      calSelected = ky;
+      if (dObj.getMonth() !== m) { calCursor = new Date(dObj.getFullYear(), dObj.getMonth(), 1); }
+      closeCalForm();
+      renderCalendar();
+    };
+    grid.appendChild(cell);
+  }
+  renderCalDay();
+}
+
+function renderCalDay() {
+  const title = document.getElementById('calDayTitle');
+  const list = document.getElementById('calDayEvents');
+  if (!title || !list) return;
+  const d = new Date(calSelected + 'T00:00:00');
+  const human = d.toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long' });
+  title.textContent = (calSelected === today() ? 'Сегодня · ' : '') + human;
+
+  list.innerHTML = '';
+  const [Y, M, D] = calSelected.split('-').map(Number);
+  const bdays = calBirthdaysOn(M, D);
+  const evs = state.calEvents.filter(e => e.date === calSelected)
+    .sort((a, b) => (a.time || '99:99').localeCompare(b.time || '99:99'));
+
+  if (!bdays.length && !evs.length) {
+    list.innerHTML = '<div class="empty">Нет событий</div>';
+    return;
+  }
+
+  bdays.forEach(b => {
+    const row = document.createElement('div');
+    row.className = 'cal-ev bday';
+    row.innerHTML = '<div class="cal-ev-time"><i class="ti ti-cake"></i></div><div class="cal-ev-title"></div>';
+    row.querySelector('.cal-ev-title').textContent = `${b.name} — день рождения`;
+    list.appendChild(row);
+  });
+
+  evs.forEach(e => {
+    const row = document.createElement('div');
+    row.className = 'cal-ev';
+    row.style.borderLeftColor = CAL_COLORS[e.color] || CAL_COLORS.blue;
+    row.innerHTML = '<div class="cal-ev-time"></div><div class="cal-ev-title"></div><button class="cal-ev-del" title="Удалить"><i class="ti ti-x"></i></button>';
+    row.querySelector('.cal-ev-time').textContent = e.time || '—';
+    row.querySelector('.cal-ev-title').textContent = e.title;
+    row.querySelector('.cal-ev-del').onclick = () => {
+      state.calEvents = state.calEvents.filter(x => x.id !== e.id);
+      save('calEvents');
+      renderCalendar();
+    };
+    list.appendChild(row);
   });
 }
 
-document.getElementById('calSyncBtn').onclick = async () => {
-  const btn = document.getElementById('calSyncBtn');
-  btn.classList.add('syncing');
-  try {
-    const resp = await fetch(API + '/calendar/events', { headers: TG_INIT ? { 'X-Telegram-Init-Data': TG_INIT } : {} });
-    if (resp.status === 401 || resp.status === 403 || resp.status === 503) { showAuthError(resp.status); }
-    else if (resp.ok) {
-      state.calendar = await resp.json();
-      save('calendar');
-      renderCalendar();
-    }
-  } catch (e) {
-    console.log('Calendar sync not available yet');
-  } finally {
-    btn.classList.remove('syncing');
-  }
+function openCalForm() {
+  const f = document.getElementById('calAddForm');
+  if (!f) return;
+  f.classList.add('open');
+  document.getElementById('calEvTitle').focus();
+}
+function closeCalForm() {
+  const f = document.getElementById('calAddForm');
+  if (!f) return;
+  f.classList.remove('open');
+  document.getElementById('calEvTitle').value = '';
+  document.getElementById('calEvTime').value = '';
+}
+
+document.getElementById('calAddBtn').onclick = () => {
+  const f = document.getElementById('calAddForm');
+  f.classList.contains('open') ? closeCalForm() : openCalForm();
+};
+document.getElementById('calEvCancel').onclick = closeCalForm;
+document.getElementById('calEvSave').onclick = () => {
+  const title = document.getElementById('calEvTitle').value.trim();
+  if (!title) return;
+  const time = document.getElementById('calEvTime').value;
+  state.calEvents.push({ id: uid(), date: calSelected, time, title, color: calNewColor });
+  save('calEvents');
+  closeCalForm();
+  renderCalendar();
+};
+document.getElementById('calEvTitle').addEventListener('keydown', e => {
+  if (e.key === 'Enter') document.getElementById('calEvSave').click();
+});
+
+// палитра цветов события
+(function () {
+  const row = document.getElementById('calColorRow');
+  Object.keys(CAL_COLORS).forEach(k => {
+    const sw = document.createElement('div');
+    sw.className = 'cal-sw' + (k === calNewColor ? ' sel' : '');
+    sw.style.background = CAL_COLORS[k];
+    sw.dataset.c = k;
+    sw.onclick = () => {
+      calNewColor = k;
+      row.querySelectorAll('.cal-sw').forEach(x => x.classList.toggle('sel', x.dataset.c === k));
+    };
+    row.appendChild(sw);
+  });
+})();
+
+document.getElementById('calPrev').onclick = () => { calCursor.setMonth(calCursor.getMonth() - 1); renderCalendar(); };
+document.getElementById('calNext').onclick = () => { calCursor.setMonth(calCursor.getMonth() + 1); renderCalendar(); };
+document.getElementById('calTodayBtn').onclick = () => {
+  calCursor = new Date(); calCursor.setDate(1);
+  calSelected = today();
+  closeCalForm();
+  renderCalendar();
 };
 
 // ══════════════════════════════════════════
@@ -4292,7 +5210,7 @@ function renderNotes(opts) {
 //  SETTINGS
 // ══════════════════════════════════════════
 let settingsOnline = false;
-const SETTING_KEYS = ['telegram_bot_token', 'telegram_chat_id', 'telegram_thread_id', 'telegram_owner_id', 'birthday_reminder_days', 'timezone'];
+const SETTING_KEYS = ['telegram_bot_token', 'telegram_chat_id', 'telegram_thread_id', 'telegram_owner_id', 'timezone'];
 
 function updateSettingsStatus() {
   const d = document.getElementById('settings-conn');
@@ -4428,7 +5346,7 @@ renderTags();
 renderTasks();
 loadTasks();
 loadFinance();
-renderBirthdays();
+loadEvents();
 renderCalendar();
 loadGarage();
 loadNotesData();
