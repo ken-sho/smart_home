@@ -159,6 +159,14 @@ body {
 .db-error-title { font-size: 15px; font-weight: 700; color: var(--text); }
 .db-error-sub { font-size: 12px; color: var(--text3); line-height: 1.6; }
 .db-error-banner .btn-primary { margin-top: 6px; display: inline-flex; align-items: center; gap: 5px; }
+.toast {
+  position: fixed; left: 50%; bottom: 22px; transform: translate(-50%, 14px);
+  background: var(--surface2); color: var(--text); border: 1px solid var(--border2);
+  border-radius: var(--radius); padding: 9px 16px; font-size: 12px; z-index: 200;
+  box-shadow: 0 6px 20px rgba(0,0,0,0.4); opacity: 0; pointer-events: none;
+  transition: opacity .2s, transform .2s; max-width: 80vw; text-align: center;
+}
+.toast.show { opacity: 1; transform: translate(-50%, 0); }
 
 /* ── Scrollable body ── */
 .panel-body {
@@ -221,6 +229,79 @@ select option { background: var(--surface); }
 }
 .tag-btn:hover { background: var(--surface2); }
 .tag-btn.active { background: var(--accent-bg); color: var(--accent-text); border-color: var(--accent); font-weight: 600; }
+
+/* ── Todo: списки/лента ── */
+.todo-view { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.todo-tabs {
+  display: flex; gap: 4px;
+  padding: 8px 12px; border-bottom: 1px solid var(--border); flex-shrink: 0;
+}
+.todo-tab {
+  flex: 1; padding: 6px 0;
+  font-size: 11.5px; font-family: inherit;
+  border: 1px solid var(--border2); background: transparent; color: var(--text2);
+  border-radius: var(--radius-sm); cursor: pointer; transition: all .12s;
+}
+.todo-tab:hover { background: var(--surface2); color: var(--text); }
+.todo-tab.active { background: var(--accent-bg); border-color: var(--accent); color: var(--accent-text); font-weight: 600; }
+
+.list-card {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 11px; margin-bottom: 5px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); cursor: pointer;
+  transition: border-color .15s, background .15s;
+}
+.list-card:hover { border-color: var(--border2); background: var(--surface2); }
+.list-card.archived { opacity: 0.6; }
+.list-card .lc-icon {
+  width: 30px; height: 30px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: var(--radius-sm); background: var(--surface2);
+  color: var(--accent); font-size: 16px;
+}
+.list-card .lc-main { flex: 1; min-width: 0; }
+.list-card .lc-name {
+  font-size: 13px; color: var(--text); font-weight: 600;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.list-card .lc-sub {
+  display: flex; align-items: center; gap: 7px; margin-top: 3px;
+  font-size: 10.5px; color: var(--text3);
+}
+.list-card .lc-prog { font-family: var(--mono); }
+.list-card .lc-remind, .list-card .lc-timer { display: inline-flex; align-items: center; gap: 3px; }
+.list-card .lc-tag {
+  font-size: 10px; padding: 1px 7px; border-radius: 20px;
+  border: 1px solid var(--border); white-space: nowrap;
+}
+.list-card .lc-chev { color: var(--text3); font-size: 15px; flex-shrink: 0; }
+
+/* тег-точка в шапке детального вида */
+.conn-dot.lc-tagdot { cursor: default; }
+
+/* детальный вид: мета-строка */
+.todo-detail-meta {
+  padding: 7px 12px; flex-shrink: 0;
+  font-size: 11px; color: var(--text2);
+  border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+}
+.todo-detail-meta:empty { display: none; }
+.todo-detail-meta .dm-tag { font-size: 10px; padding: 1px 7px; border-radius: 20px; border: 1px solid var(--border); }
+
+/* модалка создания: выбор типа */
+.list-type-row { display: flex; gap: 6px; }
+.list-type-btn {
+  flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px;
+  padding: 10px 4px; font-family: inherit; font-size: 11px;
+  border: 1px solid var(--border2); background: transparent; color: var(--text2);
+  border-radius: var(--radius-sm); cursor: pointer; transition: all .12s;
+}
+.list-type-btn i { font-size: 18px; }
+.list-type-btn:hover { background: var(--surface2); color: var(--text); }
+.list-type-btn.active { background: var(--accent-bg); border-color: var(--accent); color: var(--accent-text); }
+.list-type-extra { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
 
 .task-item {
   display: flex;
@@ -1572,21 +1653,17 @@ input[type=number]:focus { border-color: var(--accent); }
 /* — month navigation — */
 .cal-nav {
   display: flex; align-items: center; gap: 6px;
-  padding: 9px 12px;
-  border-bottom: 1px solid var(--border);
-  background: var(--surface);
-  flex-shrink: 0;
+  padding: 12px 14px 10px; flex-shrink: 0;
 }
 .cal-month {
-  flex: 1; text-align: center;
-  font-size: 13px; font-weight: 600; letter-spacing: -0.2px;
-  text-transform: capitalize;
+  flex: 1; font-size: 17px; font-weight: 600; letter-spacing: -0.3px;
 }
+.cal-month .yr { color: var(--text3); font-weight: 400; margin-left: 6px; }
 .cal-nav-btn {
-  width: 28px; height: 28px; flex-shrink: 0;
+  width: 30px; height: 30px; flex-shrink: 0;
   border: 1px solid var(--border2); background: transparent; color: var(--text2);
   border-radius: var(--radius-sm); cursor: pointer;
-  display: flex; align-items: center; justify-content: center; font-size: 16px;
+  display: flex; align-items: center; justify-content: center; font-size: 17px;
   transition: all .15s;
 }
 .cal-nav-btn:hover { background: var(--surface2); color: var(--text); }
@@ -1594,68 +1671,108 @@ input[type=number]:focus { border-color: var(--accent); }
 /* — weekday header + day grid — */
 .cal-grid-head {
   display: grid; grid-template-columns: repeat(7, 1fr);
-  padding: 7px 10px 0; flex-shrink: 0;
+  padding: 0 12px 4px; flex-shrink: 0;
 }
 .cal-grid-head span {
-  text-align: center; font-size: 9px; font-family: var(--mono);
-  text-transform: uppercase; letter-spacing: 0.5px; color: var(--text3);
-  padding-bottom: 4px;
+  text-align: center; font-size: 9.5px; font-family: var(--mono); font-weight: 500;
+  text-transform: uppercase; letter-spacing: 0.6px; color: var(--text3);
 }
-.cal-grid-head span.we { color: var(--red); opacity: 0.65; }
+.cal-grid-head span.we { color: var(--red); opacity: 0.55; }
 .cal-grid {
-  display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px;
-  padding: 0 10px 9px; flex-shrink: 0;
+  display: grid; grid-template-columns: repeat(7, 1fr); gap: 1px;
+  padding: 0 12px 12px; flex-shrink: 0;
   border-bottom: 1px solid var(--border);
 }
 .cal-cell {
   position: relative; aspect-ratio: 1 / 1;
-  display: flex; flex-direction: column; align-items: center;
-  padding-top: 5px;
-  border-radius: var(--radius-sm); cursor: pointer;
-  border: 1px solid transparent;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 5px; cursor: pointer;
+  border-radius: var(--radius-sm);
   transition: background .12s;
 }
 .cal-cell:hover { background: var(--surface2); }
-.cal-cell.other { opacity: 0.28; }
-.cal-cell-num { font-size: 12px; font-family: var(--mono); color: var(--text); line-height: 1; }
+.cal-cell.other { opacity: 0.26; }
+.cal-cell-num {
+  font-size: 14px; font-family: var(--mono); color: var(--text); line-height: 1;
+  width: 27px; height: 27px; display: flex; align-items: center; justify-content: center;
+  border-radius: 50%;
+}
 .cal-cell.we .cal-cell-num { color: var(--red); }
-.cal-cell.today { background: var(--accent-bg); }
-.cal-cell.today .cal-cell-num { color: var(--accent-text); font-weight: 700; }
-.cal-cell.sel { border-color: var(--accent); }
-.cal-dots { display: flex; gap: 2px; margin-top: 4px; min-height: 4px; }
+.cal-cell.today .cal-cell-num { background: var(--accent); color: #0c160f; font-weight: 600; }
+.cal-cell.sel .cal-cell-num { box-shadow: 0 0 0 1.5px var(--accent-text); color: var(--accent-text); }
+.cal-cell.today.sel .cal-cell-num { box-shadow: none; }
+.cal-dots { display: flex; gap: 3px; height: 4px; }
 .cal-dot { width: 4px; height: 4px; border-radius: 50%; }
 
 /* — selected day agenda — */
 .cal-day-panel { flex: 1; display: flex; flex-direction: column; min-height: 0; }
-.cal-day-head { display: flex; align-items: center; gap: 8px; padding: 9px 12px 7px; }
-.cal-day-title { flex: 1; font-size: 12px; font-weight: 600; text-transform: capitalize; }
-.cal-add-btn { width: 28px; height: 28px; padding: 0; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
-.cal-add-form { display: none; flex-direction: column; gap: 7px; padding: 0 12px 10px; }
-.cal-add-form.open { display: flex; }
-.cal-form-row { display: flex; gap: 6px; align-items: center; }
-.cal-form-row input[type=text] { flex: 1; min-width: 0; }
-.cal-form-row input[type=time] { width: 104px; flex-shrink: 0; }
-.cal-color-row { display: flex; gap: 7px; align-items: center; }
-.cal-sw { width: 20px; height: 20px; border-radius: 50%; cursor: pointer; border: 2px solid transparent; transition: border-color .12s; }
-.cal-sw.sel { border-color: var(--text); }
-.cal-form-actions { display: flex; gap: 6px; justify-content: flex-end; }
-
-.cal-day-events { flex: 1; overflow-y: auto; padding: 0 12px 12px; }
-.cal-day-events::-webkit-scrollbar { width: 3px; }
-.cal-day-events::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }
-.cal-ev {
-  display: flex; align-items: flex-start; gap: 8px;
-  padding: 7px 9px; margin-bottom: 4px;
-  background: var(--surface); border: 1px solid var(--border);
-  border-left: 3px solid var(--blue); border-radius: var(--radius);
+.cal-day-head { display: flex; align-items: flex-start; gap: 8px; padding: 14px 15px 8px; position: relative; }
+.cal-day-head-txt { flex: 1; min-width: 0; }
+.cal-day-kicker {
+  font-family: var(--mono); font-size: 9.5px; letter-spacing: 1px; text-transform: uppercase;
+  color: var(--accent-text);
 }
-.cal-ev-time { font-size: 10px; font-family: var(--mono); color: var(--text3); width: 36px; flex-shrink: 0; padding-top: 1px; }
-.cal-ev-title { flex: 1; font-size: 12px; min-width: 0; word-break: break-word; }
-.cal-ev-del { opacity: 0; color: var(--text3); cursor: pointer; font-size: 14px; background: none; border: none; padding: 0; line-height: 1; transition: opacity .12s, color .12s; }
-.cal-ev:hover .cal-ev-del { opacity: 1; }
-.cal-ev-del:hover { color: var(--red); }
-.cal-ev.bday { border-left-color: #d98fb0; }
-.cal-ev.bday .cal-ev-time { color: #d98fb0; }
+.cal-day-kicker.muted { color: var(--text3); }
+.cal-day-title { font-size: 15px; font-weight: 600; letter-spacing: -0.2px; text-transform: capitalize; margin-top: 2px; }
+.cal-add-btn {
+  width: 27px; height: 27px; padding: 0; flex-shrink: 0;
+  border: 1px solid var(--border2); background: transparent; color: var(--text2);
+  border-radius: var(--radius-sm); cursor: pointer;
+  display: flex; align-items: center; justify-content: center; font-size: 16px; transition: all .15s;
+}
+.cal-add-btn:hover { background: var(--accent-bg); color: var(--accent); border-color: var(--accent-bg); }
+.cal-add-menu {
+  display: none; position: absolute; top: 44px; right: 15px; z-index: 20;
+  flex-direction: column; min-width: 170px;
+  background: var(--surface2); border: 1px solid var(--border2);
+  border-radius: var(--radius); padding: 4px; box-shadow: 0 10px 30px rgba(0,0,0,.5);
+}
+.cal-add-menu.open { display: flex; }
+.cal-add-menu button {
+  display: flex; align-items: center; gap: 9px; padding: 8px 9px;
+  background: none; border: none; color: var(--text); cursor: pointer;
+  font-family: inherit; font-size: 12.5px; border-radius: var(--radius-sm); text-align: left;
+}
+.cal-add-menu button:hover { background: var(--surface3); }
+.cal-add-menu button i { font-size: 15px; color: var(--text2); }
+
+.cal-agenda { flex: 1; overflow-y: auto; padding: 2px 9px 14px; }
+.cal-agenda::-webkit-scrollbar { width: 3px; }
+.cal-agenda::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }
+.cal-group {
+  font-family: var(--mono); font-size: 9px; letter-spacing: 1px; text-transform: uppercase;
+  color: var(--text3); padding: 12px 6px 5px;
+}
+.cal-row {
+  display: flex; align-items: flex-start; gap: 11px; padding: 11px 9px;
+  border-radius: var(--radius); cursor: pointer; transition: background .12s; position: relative;
+}
+.cal-row:hover { background: var(--surface); }
+.cal-row + .cal-row::before {
+  content: ""; position: absolute; left: 9px; right: 9px; top: -1px; height: 1px; background: var(--border);
+}
+.cal-row:hover::before, .cal-row:hover + .cal-row::before { background: transparent; }
+.cal-mark { flex-shrink: 0; margin-top: 4px; }
+.cal-pip { width: 9px; height: 9px; border-radius: 50%; }
+.cal-ring {
+  width: 15px; height: 15px; border-radius: 50%; border: 1.5px solid var(--text3); margin-top: -3px;
+  display: flex; align-items: center; justify-content: center; font-size: 10px;
+}
+.cal-row.done .cal-ring { border-color: var(--accent); background: var(--accent-bg); color: var(--accent-text); }
+.cal-row-body { flex: 1; min-width: 0; }
+.cal-ttl { font-size: 13.5px; color: var(--text); line-height: 1.35; word-break: break-word; }
+.cal-row.done .cal-ttl { color: var(--text2); }
+.cal-sub {
+  font-family: var(--mono); font-size: 10.5px; color: var(--text2); margin-top: 3px;
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+}
+.cal-sub > span { white-space: nowrap; display: inline-flex; align-items: center; gap: 4px; }
+.cal-sub i { font-size: 11px; opacity: 0.7; }
+.cal-sub .sep { color: var(--text3); }
+.cal-meta {
+  flex-shrink: 0; font-family: var(--mono); font-size: 12px; color: var(--text2);
+  text-align: right; padding-top: 2px;
+}
 @keyframes spin { to { transform: rotate(360deg); } }
 
 /* ══════════════════════════════
@@ -1725,8 +1842,7 @@ input[type=number]:focus { border-color: var(--accent); }
   <button class="nav-btn active" data-panel="todo" title="Задачи"><i class="ti ti-checkbox"></i></button>
   <button class="nav-btn" data-panel="finance" title="Финансы"><i class="ti ti-wallet"></i></button>
   <button class="nav-btn" data-panel="birthdays" title="События"><i class="ti ti-bell"></i></button>
-  <!-- Календарь скрыт до готовности (пока localStorage-MVP) -->
-  <button class="nav-btn" data-panel="calendar" title="Календарь" style="display:none"><i class="ti ti-calendar"></i></button>
+  <button class="nav-btn" data-panel="calendar" title="Календарь"><i class="ti ti-calendar"></i></button>
   <button class="nav-btn" data-panel="garage" title="Гараж"><i class="ti ti-car"></i></button>
   <button class="nav-btn" data-panel="notes" title="Заметки"><i class="ti ti-notes"></i></button>
   <div class="nav-spacer"></div>
@@ -1737,27 +1853,45 @@ input[type=number]:focus { border-color: var(--accent); }
 <div class="main">
 
   <!-- ── TODO ── -->
-  <div class="panel active" id="panel-todo">
-    <div class="panel-header">
-      <i class="ti ti-checkbox" style="color:var(--accent)"></i>
-      <span class="panel-title">Задачи</span>
-      <span class="panel-meta" id="todo-count"></span>
-      <span class="conn-dot offline" id="todo-conn" title=""></span>
-    </div>
-    <div class="todo-add">
-      <div class="todo-add-row">
-        <input type="text" id="newTask" placeholder="Новая задача…" style="flex:1" maxlength="300" autocomplete="off">
-        <button class="btn-primary" id="addTaskBtn">+</button>
+  <div class="panel active" id="panel-todo" data-screen-label="Задачи">
+    <!-- лента списков -->
+    <div class="todo-view" id="todoFeedView">
+      <div class="panel-header">
+        <i class="ti ti-checkbox" style="color:var(--accent)"></i>
+        <span class="panel-title">Задачи</span>
+        <span class="panel-meta" id="todo-count"></span>
+        <span class="conn-dot offline" id="todo-conn" title=""></span>
+        <button class="icon-btn" id="todoAddListBtn" title="Создать список"><i class="ti ti-plus"></i></button>
+        <button class="icon-btn" id="todoTagsBtn" title="Управление тегами"><i class="ti ti-tag"></i></button>
       </div>
-      <div class="todo-add-row">
-        <input type="date" id="newDeadline" style="flex:1">
-        <input type="text" id="newTag" placeholder="тег" style="width:80px" maxlength="30" autocomplete="off">
+      <div class="todo-tabs" id="todoTabs">
+        <button class="todo-tab active" data-tab="active">Активные</button>
+        <button class="todo-tab" data-tab="archive">Архив</button>
       </div>
+      <div class="tags-bar" id="todoTagsBar"></div>
+      <div class="panel-body" id="todoList"></div>
     </div>
-    <div class="tags-bar" id="tagsBar"></div>
-    <div class="panel-body" id="taskList"></div>
-    <div class="panel-footer">
-      <button class="btn-ghost" id="clearDone">Удалить выполненные</button>
+
+    <!-- детальный вид списка -->
+    <div class="todo-view" id="todoDetailView" style="display:none">
+      <div class="panel-header">
+        <button class="icon-btn" id="todoBackBtn" title="Назад"><i class="ti ti-arrow-left"></i></button>
+        <i class="ti" id="todoDetailIcon" style="color:var(--accent)"></i>
+        <span class="panel-title" id="todoDetailTitle"></span>
+        <span class="conn-dot online" id="todoDetailTag"></span>
+        <button class="icon-btn" id="todoSendTgBtn" title="Отправить в Telegram" style="display:none"><i class="ti ti-brand-telegram"></i></button>
+        <button class="icon-btn" id="todoArchiveBtn" title="В архив" style="display:none"><i class="ti ti-archive"></i></button>
+        <button class="icon-btn" id="todoUnarchiveBtn" title="Вернуть из архива" style="display:none"><i class="ti ti-archive-off"></i></button>
+        <button class="icon-btn" id="todoDeleteBtn" title="Удалить список"><i class="ti ti-trash"></i></button>
+      </div>
+      <div class="todo-detail-meta" id="todoDetailMeta"></div>
+      <div class="panel-body" id="todoItemList"></div>
+      <div class="todo-add" id="todoItemAdd">
+        <div class="todo-add-row">
+          <input type="text" id="newItemText" placeholder="Новая строка…" style="flex:1" maxlength="300" autocomplete="off">
+          <button class="btn-primary" id="addItemBtn">+</button>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -1923,29 +2057,25 @@ input[type=number]:focus { border-color: var(--accent); }
       <button class="icon-btn" id="calTodayBtn" title="К сегодня"><i class="ti ti-calendar-event"></i></button>
     </div>
     <div class="cal-nav">
-      <button class="cal-nav-btn" id="calPrev" title="Предыдущий месяц"><i class="ti ti-chevron-left"></i></button>
       <div class="cal-month" id="calMonthLabel">—</div>
+      <button class="cal-nav-btn" id="calPrev" title="Предыдущий месяц"><i class="ti ti-chevron-left"></i></button>
       <button class="cal-nav-btn" id="calNext" title="Следующий месяц"><i class="ti ti-chevron-right"></i></button>
     </div>
     <div class="cal-grid-head" id="calWeekHead"></div>
     <div class="cal-grid" id="calGrid"></div>
     <div class="cal-day-panel">
       <div class="cal-day-head">
-        <span class="cal-day-title" id="calDayTitle">—</span>
-        <button class="btn-primary cal-add-btn" id="calAddBtn" title="Добавить событие"><i class="ti ti-plus"></i></button>
-      </div>
-      <div class="cal-add-form" id="calAddForm">
-        <div class="cal-form-row">
-          <input type="text" id="calEvTitle" placeholder="Событие…" maxlength="120" autocomplete="off">
-          <input type="time" id="calEvTime">
+        <div class="cal-day-head-txt">
+          <div class="cal-day-kicker" id="calDayKicker">—</div>
+          <div class="cal-day-title" id="calDayTitle">—</div>
         </div>
-        <div class="cal-color-row" id="calColorRow"></div>
-        <div class="cal-form-actions">
-          <button class="btn-ghost" id="calEvCancel">Отмена</button>
-          <button class="btn-primary" id="calEvSave">Добавить</button>
+        <button class="cal-add-btn" id="calAddBtn" title="Добавить"><i class="ti ti-plus"></i></button>
+        <div class="cal-add-menu" id="calAddMenu">
+          <button data-add="event"><i class="ti ti-bell"></i>Событие</button>
+          <button data-add="todo"><i class="ti ti-clock"></i>Напоминание</button>
         </div>
       </div>
-      <div class="cal-day-events" id="calDayEvents"></div>
+      <div class="cal-agenda" id="calDayEvents"></div>
     </div>
   </div>
 
@@ -2183,6 +2313,55 @@ input[type=number]:focus { border-color: var(--accent); }
   </div>
 </div>
 
+<!-- Todo: create list modal -->
+<div class="modal-overlay" id="listModal">
+  <div class="modal">
+    <div class="modal-title">Новый список</div>
+    <div class="list-type-row" id="listTypeRow">
+      <button type="button" class="list-type-btn active" data-type="shopping"><i class="ti ti-shopping-cart"></i><span>Покупки</span></button>
+      <button type="button" class="list-type-btn" data-type="tasks"><i class="ti ti-list-check"></i><span>Задачи</span></button>
+      <button type="button" class="list-type-btn" data-type="once"><i class="ti ti-clock"></i><span>Напоминание</span></button>
+    </div>
+    <input type="text" id="listNameInput" placeholder="Название списка" maxlength="120" style="width:100%" autocomplete="off">
+    <div class="edit-row">
+      <select id="listTagSelect" style="flex:1" title="Тег (необязательно)">
+        <option value="">Без тега</option>
+      </select>
+    </div>
+    <div class="list-type-extra" id="listShoppingExtra">
+      <span class="evt-flabel">Очищать отмеченное через</span>
+      <input type="number" id="listAutoClear" class="evt-num" min="1" max="10080" value="60">
+      <span class="evt-funit">мин</span>
+    </div>
+    <div class="list-type-extra" id="listOnceExtra" style="display:none">
+      <span class="evt-flabel">Напомнить</span>
+      <input type="datetime-local" id="listRemindAt" class="evt-time" style="flex:1">
+    </div>
+    <div class="modal-actions">
+      <button class="btn-ghost" id="listCancelBtn">Отмена</button>
+      <button class="btn-primary" id="listSaveBtn">Создать</button>
+    </div>
+  </div>
+</div>
+
+<!-- Todo: tags modal -->
+<div class="modal-overlay" id="todoTagsModal">
+  <div class="modal">
+    <div class="modal-title">Теги списков</div>
+    <div class="tags-modal-list" id="todoTagsModalList"></div>
+    <div class="tags-add">
+      <div class="tag-color-picker" id="todoTagColorPicker"></div>
+      <div class="tags-add-row">
+        <input type="text" id="todoNewTagName" placeholder="новый тег…" maxlength="24" style="flex:1" autocomplete="off">
+        <button class="btn-primary" id="todoAddTagBtn" style="padding:6px 10px"><i class="ti ti-plus"></i></button>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-primary" id="todoTagsModalCloseBtn">Готово</button>
+    </div>
+  </div>
+</div>
+
 <!-- Note viewer (fullscreen) -->
 <div class="modal-overlay viewer-overlay" id="noteViewer">
   <div class="viewer">
@@ -2274,7 +2453,6 @@ const DB = {
 };
 
 let state = {
-  tasks: DB.get('tasks') || [],
   finance: DB.get('finance') || { months: {} },
   birthdays: DB.get('birthdays') || [],
   eventTemplates: DB.get('eventTemplates') || [],
@@ -2294,7 +2472,14 @@ let state = {
   noteTagFilter: null,
   notesView: 'all',
   quick: [],
-  todoFilter: 'all',
+  todoTab: 'active',
+  todoTagFilter: null,
+  todoOpenList: null,
+  todoTags: [],
+  todoActiveLists: [],
+  todoActiveItems: [],
+  todoArchLists: [],
+  todoArchItems: [],
 };
 
 function save(key) { DB.set(key, state[key]); }
@@ -2333,7 +2518,19 @@ async function apiFetch(path, opts) {
   opts = opts || {};
   opts.headers = Object.assign({}, opts.headers);
   if (TG_INIT) opts.headers['X-Telegram-Init-Data'] = TG_INIT;
-  const r = await fetch(API + path, opts);
+  let r;
+  try {
+    r = await fetch(API + path, opts);
+  } catch (e) {
+    // сеть/сервер недоступны — гасим иконку портала
+    if (typeof setStatusFavicon === 'function') setStatusFavicon(false);
+    throw e;
+  }
+  if (r.status === 503) {            // сервер есть, но БД недоступна
+    if (typeof setStatusFavicon === 'function') setStatusFavicon(false);
+  } else if (r.ok) {                 // успешный ответ — связь с БД есть
+    if (typeof setStatusFavicon === 'function') setStatusFavicon(true);
+  }
   if (r.status === 401 || r.status === 403 || r.status === 503) {
     showAuthError(r.status);
     throw new Error('Unauthorized');
@@ -2341,25 +2538,7 @@ async function apiFetch(path, opts) {
   if (!r.ok) throw new Error('HTTP ' + r.status);
   return r.status === 204 ? null : r.json();
 }
-function persistTodoLocal() { DB.set('tasks', state.tasks); }
-function updateTodoStatus() {
-  const d = document.getElementById('todo-conn');
-  if (!d) return;
-  d.className = 'conn-dot ' + (todoOnline ? 'online' : 'offline');
-  d.title = todoOnline ? 'Подключено к БД' : 'Нет связи с сервером — локальный режим';
-}
-async function loadTasks() {
-  try {
-    state.tasks = await apiFetch('/todo/tasks');
-    todoOnline = true;
-  } catch (e) {
-    todoOnline = false;
-    state.tasks = DB.get('tasks') || [];
-  }
-  updateTodoStatus();
-  renderTags();
-  renderTasks();
-}
+// (Todo helpers — см. модуль TODO ниже)
 
 // ══════════════════════════════════════════
 //  NAV
@@ -2408,116 +2587,475 @@ document.getElementById('openWindowBtn').addEventListener('click', () => {
 });
 
 // ══════════════════════════════════════════
-//  TODO
+//  TODO — лента списков (БД-модуль, online-only)
+//  Типы: shopping (автоочистка) · tasks (архив) · once (напоминание)
 // ══════════════════════════════════════════
-function isOverdue(t) { return t.deadline && t.deadline < today() && !t.done; }
+const TODO_TYPE_ICON = { shopping: 'ti-shopping-cart', tasks: 'ti-list-check', once: 'ti-clock' };
+const TODO_TYPE_NAME = { shopping: 'Покупки', tasks: 'Задачи', once: 'Напоминание' };
+let newListType = 'shopping';
+let newTodoTagColor = 'green';
 
-function renderTags() {
-  const bar = document.getElementById('tagsBar');
-  const tags = [...new Set(state.tasks.map(t => t.tag).filter(Boolean))];
-  if (!tags.length) { bar.style.display = 'none'; return; }
+function curLists() { return state.todoTab === 'active' ? state.todoActiveLists : state.todoArchLists; }
+function curItems() { return state.todoTab === 'active' ? state.todoActiveItems : state.todoArchItems; }
+function todoTagById(id) { return state.todoTags.find(t => t.id === id) || null; }
+function itemsOf(listId) {
+  return curItems().filter(i => i.list_id === listId)
+    .sort((a, b) => (a.position - b.position) || (a.created_at || '').localeCompare(b.created_at || ''));
+}
+
+function updateTodoStatus() {
+  const d = document.getElementById('todo-conn');
+  if (d) {
+    d.className = 'conn-dot ' + (todoOnline ? 'online' : 'offline');
+    d.title = todoOnline ? 'Подключено к БД' : 'Нет связи с БД';
+  }
+  ['todoAddListBtn', 'todoTagsBtn'].forEach(id => {
+    const el = document.getElementById(id); if (el) el.disabled = !todoOnline;
+  });
+}
+
+async function loadTodo() {
+  try {
+    const data = await apiFetch('/todo/bootstrap');
+    state.todoTags = data.tags || [];
+    state.todoActiveLists = data.lists || [];
+    state.todoActiveItems = data.items || [];
+    todoOnline = true;
+    if (state.todoTab === 'archive') await loadTodoArchive();
+  } catch (e) {
+    todoOnline = false;
+  }
+  updateTodoStatus();
+  renderTodoTags();
+  if (state.todoOpenList) renderTodoDetail(); else renderTodoFeed();
+  if (typeof renderCalendar === 'function') renderCalendar();
+}
+async function loadTodoArchive() {
+  const d = await apiFetch('/todo/archive');
+  state.todoArchLists = d.lists || [];
+  state.todoArchItems = d.items || [];
+}
+
+// ── мини-тост ──
+function todoToast(msg) {
+  const t = document.createElement('div');
+  t.className = 'toast'; t.textContent = msg;
+  document.body.appendChild(t);
+  requestAnimationFrame(() => t.classList.add('show'));
+  setTimeout(() => { t.classList.remove('show'); setTimeout(() => t.remove(), 250); }, 2200);
+}
+
+// ── переключение видов ──
+function showTodoFeed() {
+  state.todoOpenList = null;
+  document.getElementById('todoDetailView').style.display = 'none';
+  document.getElementById('todoFeedView').style.display = 'flex';
+  renderTodoFeed();
+}
+function openTodoList(id) {
+  state.todoOpenList = id;
+  document.getElementById('todoFeedView').style.display = 'none';
+  document.getElementById('todoDetailView').style.display = 'flex';
+  renderTodoDetail();
+  const inp = document.getElementById('newItemText');
+  setTimeout(() => { if (inp && inp.offsetParent) inp.focus(); }, 30);
+}
+
+// ── табы ──
+async function setTodoTab(tab) {
+  if (state.todoTab === tab) return;
+  state.todoTab = tab;
+  document.querySelectorAll('#todoTabs .todo-tab').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+  if (tab === 'archive' && todoOnline) {
+    try { await loadTodoArchive(); } catch (e) { todoOnline = false; updateTodoStatus(); }
+  }
+  renderTodoFeed();
+}
+
+// ── фильтр по тегам ──
+function renderTodoTags() {
+  const bar = document.getElementById('todoTagsBar');
+  if (!bar) return;
+  if (!state.todoTags.length) { bar.style.display = 'none'; bar.innerHTML = ''; return; }
   bar.style.display = 'flex';
   bar.innerHTML = '';
-  ['all', ...tags].forEach(tag => {
+  const allBtn = document.createElement('button');
+  allBtn.className = 'tag-btn' + (state.todoTagFilter === null ? ' active' : '');
+  allBtn.textContent = 'Все';
+  allBtn.onclick = () => { state.todoTagFilter = null; renderTodoTags(); renderTodoFeed(); };
+  bar.appendChild(allBtn);
+  state.todoTags.forEach(tag => {
     const b = document.createElement('button');
-    b.className = 'tag-btn' + (state.todoFilter === tag ? ' active' : '');
-    b.textContent = tag === 'all' ? 'Все' : tag;
-    b.onclick = () => { state.todoFilter = tag; renderTags(); renderTasks(); };
+    b.className = 'tag-btn' + (state.todoTagFilter === tag.id ? ' active' : '');
+    const c = tagColor(tag.color);
+    b.innerHTML = `<span class="tdot" style="background:${c.fg}"></span>${tag.name}`;
+    b.onclick = () => { state.todoTagFilter = tag.id; renderTodoTags(); renderTodoFeed(); };
     bar.appendChild(b);
   });
 }
 
-function renderTasks() {
-  const el = document.getElementById('taskList');
+// ── таймер очистки shopping (мин до удаления первой отмеченной строки) ──
+function shoppingTimerLabel(list) {
+  if (list.type !== 'shopping' || !list.auto_clear_min) return null;
+  const done = itemsOf(list.id).filter(i => i.done && i.done_at);
+  if (!done.length) return null;
+  let minLeft = Infinity;
+  const now = Date.now();
+  done.forEach(i => {
+    const left = new Date(i.done_at).getTime() + list.auto_clear_min * 60000 - now;
+    if (left < minLeft) minLeft = left;
+  });
+  if (!isFinite(minLeft)) return null;
+  const m = Math.max(0, Math.round(minLeft / 60000));
+  return m <= 0 ? 'очистка скоро' : `очистка через ${m} мин`;
+}
+
+function fmtRemind(iso) {
+  if (!iso) return '';
+  return new Date(iso).toLocaleString('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+}
+
+// ── лента списков ──
+function dbErrorBanner(retryFn) {
+  const div = document.createElement('div');
+  div.className = 'db-error-banner';
+  div.innerHTML = `<i class="ti ti-database-off"></i>
+    <div class="db-error-title">БД недоступна</div>
+    <div class="db-error-sub">Задачи работают только при подключении к базе.<br>Проверьте сервер и обновите.</div>
+    <button class="btn-primary" id="todoRetryBtn"><i class="ti ti-refresh"></i> Повторить</button>`;
+  setTimeout(() => { const b = div.querySelector('#todoRetryBtn'); if (b) b.onclick = retryFn; }, 0);
+  return div;
+}
+
+function renderTodoFeed() {
+  const el = document.getElementById('todoList');
   const countEl = document.getElementById('todo-count');
-  let tasks = state.todoFilter === 'all' ? state.tasks : state.tasks.filter(t => t.tag === state.todoFilter);
-  tasks = [...tasks].sort((a, b) => {
-    if (a.done !== b.done) return a.done ? 1 : -1;
-    const ao = isOverdue(a), bo = isOverdue(b);
-    if (ao !== bo) return ao ? -1 : 1;
-    if (a.deadline && b.deadline) return a.deadline.localeCompare(b.deadline);
-    if (a.deadline) return -1; if (b.deadline) return 1;
-    return 0;
-  });
-  const active = state.tasks.filter(t => !t.done).length;
-  countEl.textContent = active ? `${active} осталось` : state.tasks.length ? '✓ готово' : '';
-  if (!tasks.length) { el.innerHTML = '<div class="empty">Задач нет</div>'; return; }
-  el.innerHTML = '';
-  tasks.forEach(t => {
-    const over = isOverdue(t);
-    const div = document.createElement('div');
-    div.className = 'task-item' + (t.done ? ' done' : '') + (over ? ' overdue' : '');
-    const chk = document.createElement('div');
-    chk.className = 'task-check' + (t.done ? ' checked' : '');
-    chk.onclick = async () => {
-      t.done = !t.done; renderTasks();
-      if (todoOnline) { try { await apiFetch('/todo/tasks/' + t.id, { method: 'PATCH', headers: JH, body: JSON.stringify({ done: t.done }) }); } catch (e) { todoOnline = false; updateTodoStatus(); persistTodoLocal(); } }
-      else persistTodoLocal();
-    };
-    const body = document.createElement('div');
-    body.className = 'task-body';
-    const txt = document.createElement('div');
-    txt.className = 'task-text';
-    txt.textContent = t.text;
-    body.appendChild(txt);
-    const meta = document.createElement('div');
-    meta.className = 'task-meta';
-    if (t.tag) {
-      const tg = document.createElement('span');
-      tg.className = 'task-tag'; tg.textContent = t.tag; meta.appendChild(tg);
-    }
-    if (t.deadline) {
-      const dt = document.createElement('span');
-      dt.className = 'task-date' + (over ? ' overdue' : '');
-      const d = new Date(t.deadline + 'T00:00:00');
-      dt.innerHTML = `<i class="ti ti-calendar"></i>${d.toLocaleDateString('ru-RU', {day:'numeric',month:'short'})}${over?' — просрочено':''}`;
-      meta.appendChild(dt);
-    }
-    if (meta.children.length) body.appendChild(meta);
-    const del = document.createElement('button');
-    del.className = 'task-del';
-    del.innerHTML = '<i class="ti ti-x"></i>';
-    del.onclick = async () => {
-      if (todoOnline) { try { await apiFetch('/todo/tasks/' + t.id, { method: 'DELETE' }); } catch (e) { todoOnline = false; updateTodoStatus(); } }
-      state.tasks = state.tasks.filter(x => x.id !== t.id);
-      if (!todoOnline) persistTodoLocal();
-      renderTags(); renderTasks();
-    };
-    div.appendChild(chk); div.appendChild(body); div.appendChild(del);
-    el.appendChild(div);
-  });
-}
-
-async function addTask() {
-  const txt = document.getElementById('newTask').value.trim();
-  if (!txt) return;
-  const deadline = document.getElementById('newDeadline').value || null;
-  const tag = document.getElementById('newTag').value.trim() || null;
-  let task = { id: uid(), text: txt, done: false, deadline, tag, created_at: new Date().toISOString() };
-  if (todoOnline) {
-    try { task = await apiFetch('/todo/tasks', { method: 'POST', headers: JH, body: JSON.stringify({ text: txt, deadline, tag }) }); }
-    catch (e) { todoOnline = false; updateTodoStatus(); }
+  if (!el) return;
+  if (!todoOnline) { countEl.textContent = ''; el.innerHTML = ''; el.appendChild(dbErrorBanner(loadTodo)); return; }
+  let lists = curLists();
+  if (state.todoTagFilter) lists = lists.filter(l => l.tag_id === state.todoTagFilter);
+  countEl.textContent = lists.length ? String(lists.length) : '';
+  if (!lists.length) {
+    el.innerHTML = state.todoTab === 'archive'
+      ? '<div class="empty">Архив пуст.</div>'
+      : (state.todoTagFilter ? '<div class="empty">Нет списков с этим тегом.</div>'
+        : '<div class="empty">Списков нет.<br>Создайте через «+» вверху.</div>');
+    return;
   }
-  state.tasks.push(task);
-  if (!todoOnline) persistTodoLocal();
-  document.getElementById('newTask').value = '';
-  document.getElementById('newDeadline').value = '';
-  document.getElementById('newTag').value = '';
-  if (tag) state.todoFilter = tag;
-  renderTags(); renderTasks();
-  document.getElementById('newTask').focus();
+  // newest first, с разделителями по дате создания
+  lists = [...lists].sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
+  el.innerHTML = '';
+  let lastDate = '';
+  lists.forEach(l => {
+    const dkey = (l.created_at || '').slice(0, 10);
+    if (dkey && dkey !== lastDate) {
+      const div = document.createElement('div');
+      div.className = 'date-divider';
+      div.innerHTML = `<span>${dateDividerLabel(dkey)}</span>`;
+      el.appendChild(div);
+      lastDate = dkey;
+    }
+    el.appendChild(buildListCard(l));
+  });
 }
 
-document.getElementById('addTaskBtn').onclick = addTask;
-document.getElementById('newTask').onkeydown = e => { if (e.key === 'Enter') addTask(); };
-document.getElementById('clearDone').onclick = async () => {
-  if (!state.tasks.some(t => t.done)) return;
-  if (!await confirmDialog({ title: 'Очистить выполненные', message: 'Удалить все выполненные задачи?', okText: 'Удалить', danger: true })) return;
-  if (todoOnline) { try { await apiFetch('/todo/tasks/clear-done', { method: 'POST' }); } catch (e) { todoOnline = false; updateTodoStatus(); } }
-  state.tasks = state.tasks.filter(t => !t.done);
-  if (!todoOnline) persistTodoLocal();
-  renderTags(); renderTasks();
-};
+function buildListCard(l) {
+  const div = document.createElement('div');
+  div.className = 'list-card' + (l.archived ? ' archived' : '');
+  const prog = (() => { const its = itemsOf(l.id); return { done: its.filter(i => i.done).length, total: its.length }; })();
+  const tag = todoTagById(l.tag_id);
+  const subParts = [];
+  if (l.type === 'once') {
+    subParts.push(`<span class="lc-remind"><i class="ti ti-clock"></i>${fmtRemind(l.remind_at)}${l.reminded ? ' · отправлено' : ''}</span>`);
+    if (prog.total) subParts.push(`<span class="lc-prog">${prog.done}/${prog.total}</span>`);
+  } else {
+    subParts.push(`<span class="lc-prog">${prog.done}/${prog.total} выполнено</span>`);
+    const tl = shoppingTimerLabel(l);
+    if (tl) subParts.push(`<span class="lc-timer"><i class="ti ti-clock-hour-4"></i>${tl}</span>`);
+  }
+  let tagHtml = '';
+  if (tag) { const c = tagColor(tag.color); tagHtml = `<span class="lc-tag" style="color:${c.fg};background:${c.bg};border-color:${c.fg}33">${tag.name}</span>`; }
+  div.innerHTML =
+    `<div class="lc-icon"><i class="ti ${TODO_TYPE_ICON[l.type] || 'ti-list'}"></i></div>` +
+    `<div class="lc-main"><div class="lc-name"></div><div class="lc-sub">${subParts.join('')}</div></div>` +
+    tagHtml +
+    `<i class="ti ti-chevron-right lc-chev"></i>`;
+  div.querySelector('.lc-name').textContent = l.name;
+  div.onclick = () => openTodoList(l.id);
+  return div;
+}
+
+// ── детальный вид ──
+function renderTodoDetail() {
+  const l = curLists().find(x => x.id === state.todoOpenList);
+  if (!l) { showTodoFeed(); return; }
+  document.getElementById('todoDetailIcon').className = 'ti ' + (TODO_TYPE_ICON[l.type] || 'ti-list');
+  document.getElementById('todoDetailTitle').textContent = l.name;
+  // тег-точка
+  const tag = todoTagById(l.tag_id);
+  const dot = document.getElementById('todoDetailTag');
+  if (tag) { const c = tagColor(tag.color); dot.style.display = ''; dot.style.background = c.fg; dot.className = 'conn-dot lc-tagdot'; dot.title = 'Тег: ' + tag.name; }
+  else { dot.style.display = 'none'; }
+  // кнопки шапки
+  document.getElementById('todoSendTgBtn').style.display = l.type === 'shopping' ? '' : 'none';
+  document.getElementById('todoArchiveBtn').style.display = (l.type === 'tasks' && !l.archived) ? '' : 'none';
+  document.getElementById('todoUnarchiveBtn').style.display = l.archived ? '' : 'none';
+  // мета-строка
+  const meta = document.getElementById('todoDetailMeta');
+  const parts = [];
+  if (tag) { const c = tagColor(tag.color); parts.push(`<span class="dm-tag" style="color:${c.fg};background:${c.bg};border-color:${c.fg}33">${tag.name}</span>`); }
+  if (l.type === 'shopping' && l.auto_clear_min) parts.push(`<span><i class="ti ti-clock-hour-4"></i> автоочистка через ${l.auto_clear_min} мин после отметки</span>`);
+  if (l.type === 'once') parts.push(`<span><i class="ti ti-bell"></i> ${fmtRemind(l.remind_at)}${l.reminded ? ' · отправлено' : ''}</span>`);
+  if (l.archived) parts.push('<span><i class="ti ti-archive"></i> в архиве</span>');
+  meta.innerHTML = parts.join('');
+  // строки
+  const list = document.getElementById('todoItemList');
+  const its = itemsOf(l.id);
+  list.innerHTML = '';
+  if (!its.length) { list.innerHTML = '<div class="empty">Пусто. Добавьте строку ниже.</div>'; }
+  its.forEach(it => list.appendChild(buildItemRow(it, l)));
+  // поле добавления — скрыто для архива
+  document.getElementById('todoItemAdd').style.display = l.archived ? 'none' : '';
+}
+
+function buildItemRow(it, list) {
+  const div = document.createElement('div');
+  div.className = 'task-item' + (it.done ? ' done' : '');
+  const chk = document.createElement('div');
+  chk.className = 'task-check' + (it.done ? ' checked' : '');
+  chk.onclick = () => toggleItem(it);
+  const body = document.createElement('div');
+  body.className = 'task-body';
+  const txt = document.createElement('div');
+  txt.className = 'task-text'; txt.textContent = it.text;
+  body.appendChild(txt);
+  const del = document.createElement('button');
+  del.className = 'task-del'; del.innerHTML = '<i class="ti ti-x"></i>';
+  del.onclick = () => deleteItem(it);
+  div.appendChild(chk); div.appendChild(body); div.appendChild(del);
+  return div;
+}
+
+// ── операции со строками ──
+async function toggleItem(it) {
+  if (!todoOnline) return;
+  const done = !it.done;
+  try {
+    const row = await apiFetch('/todo/items/' + it.id, { method: 'PATCH', headers: JH, body: JSON.stringify({ done }) });
+    Object.assign(it, row);
+    renderTodoDetail();
+  } catch (e) { todoOnline = false; updateTodoStatus(); }
+}
+async function deleteItem(it) {
+  if (!todoOnline) return;
+  try {
+    await apiFetch('/todo/items/' + it.id, { method: 'DELETE' });
+    const arr = curItems();
+    const i = arr.findIndex(x => x.id === it.id); if (i >= 0) arr.splice(i, 1);
+    renderTodoDetail();
+  } catch (e) { todoOnline = false; updateTodoStatus(); }
+}
+async function addItem() {
+  if (!todoOnline || !state.todoOpenList) return;
+  const inp = document.getElementById('newItemText');
+  const text = inp.value.trim();
+  if (!text) return;
+  try {
+    const row = await apiFetch('/todo/items', { method: 'POST', headers: JH, body: JSON.stringify({ list_id: state.todoOpenList, text }) });
+    curItems().push(row);
+    inp.value = '';
+    renderTodoDetail();
+    inp.focus();
+  } catch (e) { todoOnline = false; updateTodoStatus(); }
+}
+
+// ── операции со списком (detail) ──
+async function archiveCurrentList(archived) {
+  if (!todoOnline || !state.todoOpenList) return;
+  try {
+    await apiFetch('/todo/lists/' + state.todoOpenList, { method: 'PATCH', headers: JH, body: JSON.stringify({ archived }) });
+    await loadTodo();
+    if (state.todoTab === 'archive' && !archived) await loadTodoArchive();
+    showTodoFeed();
+    todoToast(archived ? 'Список в архиве' : 'Список возвращён');
+  } catch (e) { todoOnline = false; updateTodoStatus(); }
+}
+async function deleteCurrentList() {
+  if (!todoOnline || !state.todoOpenList) return;
+  const l = curLists().find(x => x.id === state.todoOpenList);
+  if (!await confirmDialog({ title: 'Удалить список', message: `Удалить «${l ? l.name : ''}» со всеми строками?`, okText: 'Удалить', danger: true })) return;
+  try {
+    await apiFetch('/todo/lists/' + state.todoOpenList, { method: 'DELETE' });
+    const arr = curLists(); const i = arr.findIndex(x => x.id === state.todoOpenList); if (i >= 0) arr.splice(i, 1);
+    showTodoFeed();
+  } catch (e) { todoOnline = false; updateTodoStatus(); }
+}
+async function sendCurrentListTg() {
+  if (!todoOnline || !state.todoOpenList) return;
+  const btn = document.getElementById('todoSendTgBtn');
+  btn.disabled = true;
+  try {
+    const r = await apiFetch('/todo/lists/' + state.todoOpenList + '/send-tg', { method: 'POST' });
+    todoToast('Отправлено в Telegram' + (r && r.count != null ? ` (${r.count})` : ''));
+  } catch (e) {
+    todoToast('Не удалось отправить');
+  } finally { btn.disabled = false; }
+}
+
+// ── создание списка (модалка) ──
+function setListType(type) {
+  newListType = type;
+  document.querySelectorAll('#listTypeRow .list-type-btn').forEach(b => b.classList.toggle('active', b.dataset.type === type));
+  document.getElementById('listShoppingExtra').style.display = type === 'shopping' ? 'flex' : 'none';
+  document.getElementById('listOnceExtra').style.display = type === 'once' ? 'flex' : 'none';
+}
+function fillListTagSelect() {
+  const sel = document.getElementById('listTagSelect');
+  sel.innerHTML = '<option value="">Без тега</option>';
+  state.todoTags.forEach(t => { const o = document.createElement('option'); o.value = t.id; o.textContent = t.name; sel.appendChild(o); });
+}
+function openListModal() {
+  if (!todoOnline) return;
+  setListType('shopping');
+  document.getElementById('listNameInput').value = '';
+  document.getElementById('listAutoClear').value = 60;
+  fillListTagSelect();
+  // дефолт времени напоминания: через час, локальное
+  const d = new Date(Date.now() + 3600000);
+  d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+  document.getElementById('listRemindAt').value = d.toISOString().slice(0, 16);
+  document.getElementById('listModal').classList.add('open');
+  setTimeout(() => document.getElementById('listNameInput').focus(), 30);
+}
+function closeListModal() { document.getElementById('listModal').classList.remove('open'); }
+async function saveListModal() {
+  if (!todoOnline) return;
+  const name = document.getElementById('listNameInput').value.trim();
+  if (!name) { document.getElementById('listNameInput').focus(); return; }
+  const payload = { name, type: newListType };
+  const tagId = document.getElementById('listTagSelect').value;
+  if (tagId) payload.tag_id = tagId;
+  if (newListType === 'shopping') {
+    const ac = parseInt(document.getElementById('listAutoClear').value);
+    if (!isNaN(ac) && ac > 0) payload.auto_clear_min = ac;
+  } else if (newListType === 'once') {
+    const v = document.getElementById('listRemindAt').value;
+    if (!v) { todoToast('Укажите время напоминания'); return; }
+    payload.remind_at = new Date(v).toISOString();
+  }
+  const btn = document.getElementById('listSaveBtn');
+  btn.disabled = true;
+  try {
+    const row = await apiFetch('/todo/lists', { method: 'POST', headers: JH, body: JSON.stringify(payload) });
+    closeListModal();
+    if (state.todoTab !== 'active') { await setTodoTab('active'); }
+    state.todoActiveLists.unshift(row);
+    renderTodoFeed();
+    openTodoList(row.id);
+  } catch (e) {
+    todoToast('Не удалось создать список');
+  } finally { btn.disabled = false; }
+}
+
+// ── теги (модалка) ──
+function renderTodoTagColorPicker() {
+  const wrap = document.getElementById('todoTagColorPicker');
+  wrap.innerHTML = '';
+  NOTE_TAG_COLORS.forEach(c => {
+    const s = document.createElement('div');
+    s.className = 'swatch' + (c.id === newTodoTagColor ? ' sel' : '');
+    s.style.background = c.fg; s.title = c.id;
+    s.onclick = () => { newTodoTagColor = c.id; renderTodoTagColorPicker(); };
+    wrap.appendChild(s);
+  });
+}
+function renderTodoTagsModalList() {
+  const wrap = document.getElementById('todoTagsModalList');
+  wrap.innerHTML = '';
+  state.todoTags.forEach(t => {
+    const c = tagColor(t.color);
+    const cnt = state.todoActiveLists.filter(l => l.tag_id === t.id).length + state.todoArchLists.filter(l => l.tag_id === t.id).length;
+    const row = document.createElement('div');
+    row.className = 'tag-manage-row';
+    row.innerHTML = `
+      <span class="tdot" style="background:${c.fg}" title="Сменить цвет"></span>
+      <span class="tmr-name"></span>
+      <input class="tmr-input" type="text" maxlength="24" style="display:none">
+      <span class="tmr-count">${cnt}</span>
+      <button class="tmr-edit" title="Переименовать"><i class="ti ti-pencil"></i></button>
+      <button class="tmr-del" title="Удалить"><i class="ti ti-trash"></i></button>`;
+    const nameEl = row.querySelector('.tmr-name'); nameEl.textContent = t.name;
+    const input = row.querySelector('.tmr-input');
+    const startEdit = () => { input.value = t.name; nameEl.style.display = 'none'; input.style.display = ''; input.focus(); input.select(); };
+    const commit = async () => {
+      const nn = input.value.trim();
+      if (nn && nn !== t.name) {
+        try { const r = await apiFetch('/todo/tags/' + t.id, { method: 'PATCH', headers: JH, body: JSON.stringify({ name: nn }) }); t.name = r.name; renderTodoTags(); renderTodoFeed(); }
+        catch (e) { todoToast('Имя занято или ошибка'); }
+      }
+      renderTodoTagsModalList();
+    };
+    nameEl.onclick = startEdit; row.querySelector('.tmr-edit').onclick = startEdit;
+    input.onkeydown = (e) => { if (e.key === 'Enter') commit(); else if (e.key === 'Escape') renderTodoTagsModalList(); };
+    input.onblur = commit;
+    row.querySelector('.tdot').onclick = async () => {
+      const idx = NOTE_TAG_COLORS.findIndex(x => x.id === t.color);
+      const next = NOTE_TAG_COLORS[(idx + 1) % NOTE_TAG_COLORS.length].id;
+      try { const r = await apiFetch('/todo/tags/' + t.id, { method: 'PATCH', headers: JH, body: JSON.stringify({ color: next }) }); t.color = r.color; renderTodoTagsModalList(); renderTodoTags(); renderTodoFeed(); }
+      catch (e) { todoToast('Ошибка'); }
+    };
+    row.querySelector('.tmr-del').onclick = async () => {
+      if (cnt > 0) { todoToast(`Тег используется в списках: ${cnt}`); return; }
+      if (!await confirmDialog({ title: 'Удалить тег', message: `Удалить тег «${t.name}»?`, okText: 'Удалить', danger: true })) return;
+      try { await apiFetch('/todo/tags/' + t.id, { method: 'DELETE' }); state.todoTags = state.todoTags.filter(x => x.id !== t.id); if (state.todoTagFilter === t.id) state.todoTagFilter = null; renderTodoTagsModalList(); renderTodoTags(); renderTodoFeed(); }
+      catch (e) { todoToast('Не удалось удалить (возможно, есть списки в архиве)'); }
+    };
+    wrap.appendChild(row);
+  });
+}
+function openTodoTagsModal() {
+  if (!todoOnline) return;
+  newTodoTagColor = 'green';
+  document.getElementById('todoNewTagName').value = '';
+  renderTodoTagColorPicker();
+  renderTodoTagsModalList();
+  document.getElementById('todoTagsModal').classList.add('open');
+}
+function closeTodoTagsModal() { document.getElementById('todoTagsModal').classList.remove('open'); }
+async function addTodoTag() {
+  if (!todoOnline) return;
+  const inp = document.getElementById('todoNewTagName');
+  const name = inp.value.trim();
+  if (!name) return;
+  try {
+    const r = await apiFetch('/todo/tags', { method: 'POST', headers: JH, body: JSON.stringify({ name, color: newTodoTagColor }) });
+    state.todoTags.push(r);
+    state.todoTags.sort((a, b) => a.name.localeCompare(b.name));
+    inp.value = '';
+    renderTodoTagColorPicker(); renderTodoTagsModalList(); renderTodoTags();
+  } catch (e) { todoToast('Тег с таким именем уже есть'); }
+}
+
+// ── обработчики ──
+document.getElementById('todoAddListBtn').onclick = openListModal;
+document.getElementById('todoTagsBtn').onclick = openTodoTagsModal;
+document.getElementById('todoBackBtn').onclick = showTodoFeed;
+document.getElementById('todoSendTgBtn').onclick = sendCurrentListTg;
+document.getElementById('todoArchiveBtn').onclick = () => archiveCurrentList(true);
+document.getElementById('todoUnarchiveBtn').onclick = () => archiveCurrentList(false);
+document.getElementById('todoDeleteBtn').onclick = deleteCurrentList;
+document.getElementById('addItemBtn').onclick = addItem;
+document.getElementById('newItemText').onkeydown = e => { if (e.key === 'Enter') addItem(); };
+document.querySelectorAll('#todoTabs .todo-tab').forEach(b => b.onclick = () => setTodoTab(b.dataset.tab));
+document.querySelectorAll('#listTypeRow .list-type-btn').forEach(b => b.onclick = () => setListType(b.dataset.type));
+document.getElementById('listCancelBtn').onclick = closeListModal;
+document.getElementById('listSaveBtn').onclick = saveListModal;
+document.getElementById('listNameInput').onkeydown = e => { if (e.key === 'Enter') saveListModal(); };
+document.getElementById('listModal').onclick = e => { if (e.target.id === 'listModal') closeListModal(); };
+document.getElementById('todoAddTagBtn').onclick = addTodoTag;
+document.getElementById('todoNewTagName').onkeydown = e => { if (e.key === 'Enter') addTodoTag(); };
+document.getElementById('todoTagsModalCloseBtn').onclick = closeTodoTagsModal;
+document.getElementById('todoTagsModal').onclick = e => { if (e.target.id === 'todoTagsModal') closeTodoTagsModal(); };
 
 // ══════════════════════════════════════════
 //  FINANCE — режимы «Кредиты» + «Д/К» (через API, без офлайна)
@@ -2568,6 +3106,36 @@ function setFinanceBadge() {
     if (b) b.remove();
     btn.title = 'Финансы';
   }
+  refreshFaviconBadge();
+}
+
+// ══════════════════════════════════════════
+// БЕЙДЖ-СЧЁТЧИК НА ИКОНКЕ (вкладка + кнопка вебпанели Vivaldi)
+// Vivaldi рисует бейдж сам, считывая счётчик в начале заголовка
+// документа в формате "(N) Заголовок" (см. Tab Notifications).
+// ══════════════════════════════════════════
+const _titleBase = (document.title || 'Портал').replace(/^\(\d+\)\s*/, '');
+function refreshFaviconBadge() {
+  let n = 0;
+  try { (state.events || []).forEach(ev => { if (evtAlertActive(ev) && ev.acked_key !== evtOccKey(ev)) n++; }); } catch (e) {}
+  if (typeof financeOnline !== 'undefined' && financeOnline && typeof financeOverdue !== 'undefined' && financeOverdue > 0) n += financeOverdue;
+  document.title = n > 0 ? '(' + n + ') ' + _titleBase : _titleBase;
+}
+
+// ── Динамический favicon: отражает связь с БД ──
+// Vivaldi показывает favicon на кнопке вебпанели и обновляет её на лету.
+// Онлайн — фирменная синяя иконка-глобус; офлайн — приглушённая серая
+// с маленькой красной точкой-индикатором в углу.
+const FAVICON_ONLINE =
+  "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%233a40e0'/%3E%3Ccircle cx='16' cy='16' r='8' fill='none' stroke='white' stroke-width='1.7'/%3E%3Cpath d='M8 16h16 M16 8v16 M16 8c3.2 2.2 3.2 13.8 0 16 M16 8c-3.2 2.2-3.2 13.8 0 16' stroke='white' stroke-width='1.4' fill='none'/%3E%3C/svg%3E";
+const FAVICON_OFFLINE =
+  "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%2335353b'/%3E%3Ccircle cx='16' cy='16' r='8' fill='none' stroke='%238a8a82' stroke-width='1.7'/%3E%3Cpath d='M8 16h16 M16 8v16 M16 8c3.2 2.2 3.2 13.8 0 16 M16 8c-3.2 2.2-3.2 13.8 0 16' stroke='%238a8a82' stroke-width='1.4' fill='none'/%3E%3Ccircle cx='25' cy='7' r='6' fill='%23e5403a' stroke='%2335353b' stroke-width='2'/%3E%3C/svg%3E";
+let _dbReachable = null;        // null = ещё неизвестно
+function setStatusFavicon(online) {
+  if (online === _dbReachable) return;       // ничего не изменилось
+  _dbReachable = online;
+  const link = document.querySelector('link[rel="icon"]');
+  if (link) link.href = online ? FAVICON_ONLINE : FAVICON_OFFLINE;
 }
 
 // ── загрузка ──
@@ -2989,6 +3557,9 @@ function portalBusy() {
   if (document.getElementById('finForm').classList.contains('open')) return true;
   if (document.getElementById('svcForm').classList.contains('open')) return true;
   if (document.getElementById('vehicleModal').classList.contains('open')) return true;
+  if (document.getElementById('listModal').classList.contains('open')) return true;
+  if (document.getElementById('todoTagsModal').classList.contains('open')) return true;
+  if (state.todoOpenList) return true;
   const ae = document.activeElement;
   if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable)) return true;
   const ed = document.getElementById('noteEditor');
@@ -3001,7 +3572,7 @@ async function softRefresh() {
   if (softRefreshing || document.hidden || portalBusy()) return;
   softRefreshing = true;
   try {
-    if (typeof loadTasks === 'function') await loadTasks();
+    if (typeof loadTodo === 'function' && !state.todoOpenList) await loadTodo();
     if (financeOnline) {
       if (financeMode === 'dk') await loadDK(state.currentMonth);
       else await loadFinMonth(state.currentMonth);
@@ -3069,6 +3640,32 @@ function evtOccKey(ev) {
 }
 // за сколько дней до события оповещение становится активным
 function evtLead(ev) { return ev.recur === 'yearly' ? (ev.lead_days || 0) : 0; }
+// прошло ли сегодня указанное время ЧЧ:ММ (по локальному времени браузера)
+function evtTimePassed(hhmm) {
+  if (!hhmm) return true;                 // нет времени — нечего гейтить, активно весь день
+  const [h, m] = hhmm.split(':').map(Number);
+  const now = new Date();
+  return now.getHours() > h || (now.getHours() === h && now.getMinutes() >= m);
+}
+// в окне наступления (для acked-карточек «готово»): yearly — прогрев+день, daily — сегодня
+function evtInWindow(ev) {
+  const days = evtDaysUntil(ev);
+  if (days < 0) return false;
+  return ev.recur === 'yearly' ? days <= evtLead(ev) : days === 0;
+}
+// оповещение «горит» прямо сейчас (подсветка + кнопка «Готово»)
+function evtAlertActive(ev) {
+  const days = evtDaysUntil(ev);
+  if (ev.recur === 'yearly') {
+    const lead = evtLead(ev);
+    if (days < 0 || days > lead) return false;
+    if (days >= 1) return true;            // окно прогрева (за N дней)
+    if (lead > 0) return true;             // день события, прогрев уже шёл — не гасим
+    return evtTimePassed(ev.at_time || '09:00');   // без прогрева — с времени старта
+  }
+  // daily: строго по времени в день недели (не с полуночи)
+  return days === 0 && evtTimePassed(ev.at_time);
+}
 function evtDailyDaysText(ev) {
   if (ev.recur === 'daily' && ev.weekdays && ev.weekdays.length) {
     return ev.weekdays.slice().sort((a, b) => a - b).map(i => EVT_WD_SHORT[i]).join(', ');
@@ -3163,7 +3760,7 @@ function evtSection(el, text) {
 function updateEvtBadge() {
   const colors = new Set(); let n = 0;
   state.events.forEach(ev => {
-    if (evtDaysUntil(ev) <= evtLead(ev) && ev.acked_key !== evtOccKey(ev)) { n++; colors.add(evtColor(ev.color)); }
+    if (evtAlertActive(ev) && ev.acked_key !== evtOccKey(ev)) { n++; colors.add(evtColor(ev.color)); }
   });
   const btn = document.querySelector('.nav-btn[data-panel="birthdays"]');
   if (!btn) return;
@@ -3174,6 +3771,7 @@ function updateEvtBadge() {
     else { b.className = 'badge'; b.style.background = [...colors][0] || 'var(--red)'; }
     btn.title = 'События — оповещений: ' + n;
   } else { if (b) b.remove(); btn.title = 'События'; }
+  refreshFaviconBadge();
 }
 function evtSub(ev) {
   const days = evtDaysUntil(ev);
@@ -3253,9 +3851,10 @@ function renderEvents() {
     || (evtFilter === 'daily' && ev.recur !== 'yearly');
   const active = [], acked = [], upcoming = [];
   state.events.filter(pass).forEach(ev => {
-    const lead = evtLead(ev); const days = evtDaysUntil(ev);
-    if (days <= lead) (ev.acked_key === evtOccKey(ev) ? acked : active).push(ev);
-    else upcoming.push(ev);
+    const ackedNow = ev.acked_key === evtOccKey(ev);
+    if (ackedNow) { (evtInWindow(ev) ? acked : upcoming).push(ev); }
+    else if (evtAlertActive(ev)) { active.push(ev); }
+    else { upcoming.push(ev); }
   });
   const byDays = (a, b) => evtDaysUntil(a) - evtDaysUntil(b);
   active.sort(byDays); acked.sort(byDays); upcoming.sort(byDays);
@@ -3521,26 +4120,85 @@ document.querySelectorAll('#evtFilter .evt-filter-btn').forEach(btn => {
 });
 
 applyEvtRecurFields();
+// перерисовка раз в минуту: подсветка/бейдж появляются в at_time без ручного обновления
+setInterval(() => { if (!document.hidden) renderEvents(); }, 60 * 1000);
 
 // ══════════════════════════════════════════
 //  CALENDAR (MVP — события в localStorage)
 // ══════════════════════════════════════════
-const CAL_COLORS = { blue: 'var(--blue)', green: 'var(--accent)', yellow: 'var(--yellow)', red: 'var(--red)' };
-const CAL_BDAY_COLOR = '#d98fb0';
+const CAL_COLORS = { blue: 'var(--blue)', green: 'var(--accent)', yellow: 'var(--yellow)', red: 'var(--red)', pink: '#d98fb0' };
 const CAL_WEEKDAYS = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
 const CAL_MONTHS = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
 let calCursor = (() => { const d = new Date(); d.setDate(1); return d; })();
 let calSelected = today();
-let calNewColor = 'blue';
 
 function calPad(n) { return String(n).padStart(2, '0'); }
 function calKey(y, m, d) { return `${y}-${calPad(m + 1)}-${calPad(d)}`; }
+function calColor(c) { return CAL_COLORS[c] || CAL_COLORS.blue; }
 
-// календарь показывает годовые события (state.events: recur='yearly' с day/month)
-function calBirthdaysOn(mm, dd) {
-  return (state.events || [])
-    .filter(e => e.recur === 'yearly' && e.month === mm && e.day === dd)
-    .map(e => ({ name: e.name }));
+function calDailyLabel(wd) {
+  if (!wd || wd.length === 0 || wd.length === 7) return 'ежедневно';
+  const s = [...wd].sort((a, b) => a - b).join();
+  if (s === '0,1,2,3,4') return 'по будням';
+  if (s === '5,6') return 'по выходным';
+  return [...wd].sort((a, b) => a - b).map(i => CAL_WEEKDAYS[i].toLowerCase()).join(', ');
+}
+
+// все запланированные элементы на дату (Y, m0 — месяц 0-индекс, D)
+function calItemsOn(Y, m0, D) {
+  const M = m0 + 1;
+  const dow = (new Date(Y, m0, D).getDay() + 6) % 7;   // 0=Пн
+  const dateKey = calKey(Y, m0, D);
+  const out = [];
+
+  // — события (вкладка «События») —
+  (state.events || []).forEach(e => {
+    if (e.recur === 'yearly') {
+      if (e.month === M && e.day === D && (!e.year || e.year === Y)) {
+        out.push({
+          kind: 'event', source: 'events', id: e.id,
+          color: e.color, title: e.name, time: e.at_time || null,
+          recurLabel: e.year ? null : 'ежегодно', annual: !e.year
+        });
+      }
+    } else if (e.recur === 'daily') {
+      const wd = e.weekdays;
+      if (!wd || wd.length === 0 || wd.includes(dow)) {
+        out.push({
+          kind: 'event', source: 'events', id: e.id,
+          color: e.color, title: e.name, time: e.at_time || null,
+          recurLabel: calDailyLabel(wd), annual: false
+        });
+      }
+    }
+  });
+
+  // — разовые напоминания (вкладка «Todo», списки типа once) —
+  (state.todoActiveLists || []).forEach(l => {
+    if (l.type === 'once' && l.remind_at) {
+      const dt = new Date(l.remind_at);
+      if (calKey(dt.getFullYear(), dt.getMonth(), dt.getDate()) === dateKey) {
+        out.push({
+          kind: 'todo', source: 'todo', id: l.id,
+          color: l.reminded ? 'green' : 'yellow', title: l.name,
+          time: calPad(dt.getHours()) + ':' + calPad(dt.getMinutes()),
+          reminded: l.reminded
+        });
+      }
+    }
+  });
+
+  return out;
+}
+
+// без времени (весь день) — сверху, далее по времени
+function calSortItems(items) {
+  return items.slice().sort((a, b) => {
+    const ta = a.time || '', tb = b.time || '';
+    if (!ta && tb) return -1;
+    if (ta && !tb) return 1;
+    return ta.localeCompare(tb);
+  });
 }
 
 function renderCalendar() {
@@ -3549,7 +4207,7 @@ function renderCalendar() {
   const label = document.getElementById('calMonthLabel');
   if (!grid) return;
   const y = calCursor.getFullYear(), m = calCursor.getMonth();
-  label.textContent = `${CAL_MONTHS[m]} ${y}`;
+  label.innerHTML = `${CAL_MONTHS[m]}<span class="yr">${y}</span>`;
 
   if (!head.childElementCount) {
     CAL_WEEKDAYS.forEach((w, i) => {
@@ -3562,11 +4220,7 @@ function renderCalendar() {
 
   const first = new Date(y, m, 1);
   const lead = (first.getDay() + 6) % 7;            // понедельник = 0
-  const daysInMonth = new Date(y, m + 1, 0).getDate();
   const todayStr = today();
-
-  const byDate = {};
-  state.calEvents.forEach(e => { (byDate[e.date] = byDate[e.date] || []).push(e); });
 
   grid.innerHTML = '';
   for (let i = 0; i < 42; i++) {
@@ -3587,12 +4241,10 @@ function renderCalendar() {
 
     const dots = document.createElement('div');
     dots.className = 'cal-dots';
-    const colors = (byDate[ky] || []).slice(0, 3).map(e => CAL_COLORS[e.color] || CAL_COLORS.blue);
-    if (calBirthdaysOn(dObj.getMonth() + 1, dObj.getDate()).length) colors.push(CAL_BDAY_COLOR);
-    colors.slice(0, 3).forEach(c => {
+    calItemsOn(dObj.getFullYear(), dObj.getMonth(), dObj.getDate()).slice(0, 3).forEach(it => {
       const dot = document.createElement('span');
       dot.className = 'cal-dot';
-      dot.style.background = c;
+      dot.style.background = calColor(it.color);
       dots.appendChild(dot);
     });
     cell.appendChild(dots);
@@ -3600,7 +4252,7 @@ function renderCalendar() {
     cell.onclick = () => {
       calSelected = ky;
       if (dObj.getMonth() !== m) { calCursor = new Date(dObj.getFullYear(), dObj.getMonth(), 1); }
-      closeCalForm();
+      closeCalAddMenu();
       renderCalendar();
     };
     grid.appendChild(cell);
@@ -3609,102 +4261,135 @@ function renderCalendar() {
 }
 
 function renderCalDay() {
+  const kicker = document.getElementById('calDayKicker');
   const title = document.getElementById('calDayTitle');
   const list = document.getElementById('calDayEvents');
   if (!title || !list) return;
   const d = new Date(calSelected + 'T00:00:00');
-  const human = d.toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long' });
-  title.textContent = (calSelected === today() ? 'Сегодня · ' : '') + human;
+  const isToday = calSelected === today();
+  kicker.textContent = isToday ? 'Сегодня' : d.toLocaleDateString('ru-RU', { weekday: 'long' });
+  kicker.className = 'cal-day-kicker' + (isToday ? '' : ' muted');
+  title.textContent = d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' });
 
-  list.innerHTML = '';
   const [Y, M, D] = calSelected.split('-').map(Number);
-  const bdays = calBirthdaysOn(M, D);
-  const evs = state.calEvents.filter(e => e.date === calSelected)
-    .sort((a, b) => (a.time || '99:99').localeCompare(b.time || '99:99'));
-
-  if (!bdays.length && !evs.length) {
-    list.innerHTML = '<div class="empty">Нет событий</div>';
+  const all = calItemsOn(Y, M - 1, D);
+  list.innerHTML = '';
+  if (!all.length) {
+    list.innerHTML = '<div class="empty"><i class="ti ti-coffee" style="display:block;font-size:26px;margin-bottom:8px;opacity:.5"></i>Свободный день</div>';
     return;
   }
+  const events = calSortItems(all.filter(i => i.kind === 'event'));
+  const todos = calSortItems(all.filter(i => i.kind === 'todo'));
+  const both = events.length && todos.length;
 
-  bdays.forEach(b => {
-    const row = document.createElement('div');
-    row.className = 'cal-ev bday';
-    row.innerHTML = '<div class="cal-ev-time"><i class="ti ti-cake"></i></div><div class="cal-ev-title"></div>';
-    row.querySelector('.cal-ev-title').textContent = `${b.name} — день рождения`;
-    list.appendChild(row);
-  });
-
-  evs.forEach(e => {
-    const row = document.createElement('div');
-    row.className = 'cal-ev';
-    row.style.borderLeftColor = CAL_COLORS[e.color] || CAL_COLORS.blue;
-    row.innerHTML = '<div class="cal-ev-time"></div><div class="cal-ev-title"></div><button class="cal-ev-del" title="Удалить"><i class="ti ti-x"></i></button>';
-    row.querySelector('.cal-ev-time').textContent = e.time || '—';
-    row.querySelector('.cal-ev-title').textContent = e.title;
-    row.querySelector('.cal-ev-del').onclick = () => {
-      state.calEvents = state.calEvents.filter(x => x.id !== e.id);
-      save('calEvents');
-      renderCalendar();
-    };
-    list.appendChild(row);
-  });
+  if (events.length) {
+    if (both) list.appendChild(calGroupEl('События'));
+    events.forEach(it => list.appendChild(calRowEl(it)));
+  }
+  if (todos.length) {
+    if (both) list.appendChild(calGroupEl('Задачи на день'));
+    todos.forEach(it => list.appendChild(calRowEl(it)));
+  }
 }
 
-function openCalForm() {
-  const f = document.getElementById('calAddForm');
-  if (!f) return;
-  f.classList.add('open');
-  document.getElementById('calEvTitle').focus();
-}
-function closeCalForm() {
-  const f = document.getElementById('calAddForm');
-  if (!f) return;
-  f.classList.remove('open');
-  document.getElementById('calEvTitle').value = '';
-  document.getElementById('calEvTime').value = '';
+function calGroupEl(txt) {
+  const g = document.createElement('div'); g.className = 'cal-group'; g.textContent = txt; return g;
 }
 
-document.getElementById('calAddBtn').onclick = () => {
-  const f = document.getElementById('calAddForm');
-  f.classList.contains('open') ? closeCalForm() : openCalForm();
+function calRowEl(it) {
+  const row = document.createElement('div');
+  row.className = 'cal-row' + (it.reminded ? ' done' : '');
+
+  const mark = document.createElement('div'); mark.className = 'cal-mark';
+  if (it.kind === 'todo') {
+    const r = document.createElement('div'); r.className = 'cal-ring';
+    if (it.reminded) r.innerHTML = '<i class="ti ti-check"></i>';
+    else r.style.borderColor = calColor(it.color);
+    mark.appendChild(r);
+  } else {
+    const p = document.createElement('div'); p.className = 'cal-pip';
+    p.style.background = calColor(it.color);
+    mark.appendChild(p);
+  }
+  row.appendChild(mark);
+
+  const body = document.createElement('div'); body.className = 'cal-row-body';
+  const t = document.createElement('div'); t.className = 'cal-ttl'; t.textContent = it.title;
+  body.appendChild(t);
+
+  const subs = [];
+  if (it.kind === 'todo') {
+    subs.push(['ti-bell', it.reminded ? 'напоминание отправлено' : 'напоминание']);
+  } else if (it.annual) {
+    subs.push(['ti-confetti', 'ежегодно']);
+  } else if (it.recurLabel) {
+    subs.push(['ti-repeat', it.recurLabel]);
+  }
+  if (subs.length) {
+    const s = document.createElement('div'); s.className = 'cal-sub';
+    subs.forEach((pair, idx) => {
+      if (idx > 0) { const sep = document.createElement('span'); sep.className = 'sep'; sep.textContent = '·'; s.appendChild(sep); }
+      const w = document.createElement('span');
+      w.innerHTML = '<i class="ti ' + pair[0] + '"></i>' + pair[1];
+      s.appendChild(w);
+    });
+    body.appendChild(s);
+  }
+  row.appendChild(body);
+
+  if (it.time) {
+    const meta = document.createElement('div'); meta.className = 'cal-meta'; meta.textContent = it.time;
+    row.appendChild(meta);
+  }
+
+  row.onclick = () => {
+    if (it.source === 'todo') {
+      activatePanel('todo');
+      if (typeof openTodoList === 'function') openTodoList(it.id);
+    } else {
+      activatePanel('birthdays');
+    }
+  };
+  return row;
+}
+
+// ── меню «добавить» (deep-link в источник) ──
+function closeCalAddMenu() {
+  const m = document.getElementById('calAddMenu'); if (m) m.classList.remove('open');
+}
+document.getElementById('calAddBtn').onclick = (e) => {
+  e.stopPropagation();
+  document.getElementById('calAddMenu').classList.toggle('open');
 };
-document.getElementById('calEvCancel').onclick = closeCalForm;
-document.getElementById('calEvSave').onclick = () => {
-  const title = document.getElementById('calEvTitle').value.trim();
-  if (!title) return;
-  const time = document.getElementById('calEvTime').value;
-  state.calEvents.push({ id: uid(), date: calSelected, time, title, color: calNewColor });
-  save('calEvents');
-  closeCalForm();
-  renderCalendar();
-};
-document.getElementById('calEvTitle').addEventListener('keydown', e => {
-  if (e.key === 'Enter') document.getElementById('calEvSave').click();
+document.querySelectorAll('#calAddMenu button').forEach(btn => {
+  btn.onclick = () => {
+    closeCalAddMenu();
+    if (btn.dataset.add === 'event') {
+      activatePanel('birthdays');
+      if (typeof openEvtForm === 'function') openEvtForm();
+    } else {
+      activatePanel('todo');
+      if (typeof openListModal === 'function') {
+        openListModal();
+        if (typeof setListType === 'function') setListType('once');
+      }
+    }
+  };
 });
-
-// палитра цветов события
-(function () {
-  const row = document.getElementById('calColorRow');
-  Object.keys(CAL_COLORS).forEach(k => {
-    const sw = document.createElement('div');
-    sw.className = 'cal-sw' + (k === calNewColor ? ' sel' : '');
-    sw.style.background = CAL_COLORS[k];
-    sw.dataset.c = k;
-    sw.onclick = () => {
-      calNewColor = k;
-      row.querySelectorAll('.cal-sw').forEach(x => x.classList.toggle('sel', x.dataset.c === k));
-    };
-    row.appendChild(sw);
-  });
-})();
+document.addEventListener('click', (e) => {
+  const menu = document.getElementById('calAddMenu');
+  const btn = document.getElementById('calAddBtn');
+  if (menu && menu.classList.contains('open') && !menu.contains(e.target) && btn && !btn.contains(e.target)) {
+    closeCalAddMenu();
+  }
+});
 
 document.getElementById('calPrev').onclick = () => { calCursor.setMonth(calCursor.getMonth() - 1); renderCalendar(); };
 document.getElementById('calNext').onclick = () => { calCursor.setMonth(calCursor.getMonth() + 1); renderCalendar(); };
 document.getElementById('calTodayBtn').onclick = () => {
   calCursor = new Date(); calCursor.setDate(1);
   calSelected = today();
-  closeCalForm();
+  closeCalAddMenu();
   renderCalendar();
 };
 
@@ -5342,9 +6027,7 @@ document.querySelectorAll('#settingsBody .secret-toggle').forEach(btn => {
 // ══════════════════════════════════════════
 //  INIT
 // ══════════════════════════════════════════
-renderTags();
-renderTasks();
-loadTasks();
+loadTodo();
 loadFinance();
 loadEvents();
 renderCalendar();

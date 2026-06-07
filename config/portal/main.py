@@ -23,11 +23,13 @@ import asyncio
 import ipaddress
 import calendar
 from urllib.parse import unquote
-from datetime import date as Date
+from datetime import date as Date, datetime, timedelta
+from zoneinfo import ZoneInfo
 from pathlib import Path
 from contextlib import asynccontextmanager
 
 import asyncpg
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -55,13 +57,16 @@ PORTAL_HTML = Path(os.getenv("PORTAL_HTML", BASE_DIR.parent / "portal.html"))
 PORTAL_PUBLIC_URL = os.getenv("PORTAL_PUBLIC_URL", "https://core.tail751bc9.ts.net").rstrip("/")
 SCHEMA_FILES = [
     BASE_DIR / "app_schema.sql",
+    BASE_DIR / "todo_schema.sql",
     BASE_DIR / "events_schema.sql",
     BASE_DIR / "notes_schema.sql",
     BASE_DIR / "finance_schema.sql",
     BASE_DIR / "garage_schema.sql",
+    BASE_DIR / "cal_schema.sql",
 ]
 
 pool: asyncpg.Pool | None = None
+scheduler: AsyncIOScheduler | None = None
 
 
 async def _setup_conn(conn):
@@ -92,7 +97,17 @@ async def lifespan(app: FastAPI):
                 print("[webhook] не зарегистрирован:", res.get("error"))
     except Exception as e:
         print("[webhook] ошибка регистрации:", e)
+    # планировщик оповещений (тик раз в минуту)
+    global scheduler
+    scheduler = AsyncIOScheduler(timezone="UTC")
+    scheduler.add_job(
+        notify_tick, "interval", minutes=1, id="evt_notify",
+        coalesce=True, max_instances=1, misfire_grace_time=30,
+    )
+    scheduler.start()
     yield
+    if scheduler:
+        scheduler.shutdown(wait=False)
     await pool.close()
 
 
@@ -363,27 +378,85 @@ async def bot_webhook_register():
     return await register_webhook()
 
 
-# ── модели ────────────────────────────────────────────────────
-class TaskIn(BaseModel):
+# ── модели Todo ───────────────────────────────────────────────
+from datetime import datetime as _DT, timezone as _TZ
+
+_TODO_COLORS = {"green", "blue", "yellow", "red", "purple", "gray"}
+_TODO_TYPES = {"shopping", "tasks", "once"}
+
+
+def _todo_color(c):
+    return c if c in _TODO_COLORS else "green"
+
+
+class TagIn(BaseModel):
+    name: str
+    color: str = "green"
+
+
+class TagPatch(BaseModel):
+    name: str | None = None
+    color: str | None = None
+
+
+class ListIn(BaseModel):
+    name: str
+    type: str
+    tag_id: uuid.UUID | None = None
+    auto_clear_min: int | None = None
+    remind_at: _DT | None = None
+
+
+class ListPatch(BaseModel):
+    name: str | None = None
+    tag_id: uuid.UUID | None = None
+    archived: bool | None = None
+
+
+class ItemIn(BaseModel):
+    list_id: uuid.UUID
     text: str
-    deadline: Date | None = None
-    tag: str | None = None
+    position: int | None = None
 
 
-class TaskPatch(BaseModel):
+class ItemPatch(BaseModel):
     text: str | None = None
     done: bool | None = None
-    deadline: Date | None = None
-    tag: str | None = None
+    position: int | None = None
 
 
-def to_task(r: asyncpg.Record) -> dict:
+def to_todo_tag(r) -> dict:
     return {
         "id": str(r["id"]),
+        "name": r["name"],
+        "color": r["color"],
+        "created_at": r["created_at"].isoformat(),
+    }
+
+
+def to_list(r) -> dict:
+    return {
+        "id": str(r["id"]),
+        "name": r["name"],
+        "type": r["type"],
+        "tag_id": str(r["tag_id"]) if r["tag_id"] else None,
+        "auto_clear_min": r["auto_clear_min"],
+        "remind_at": r["remind_at"].isoformat() if r["remind_at"] else None,
+        "reminded": r["reminded"],
+        "archived": r["archived"],
+        "archived_at": r["archived_at"].isoformat() if r["archived_at"] else None,
+        "created_at": r["created_at"].isoformat(),
+    }
+
+
+def to_item(r) -> dict:
+    return {
+        "id": str(r["id"]),
+        "list_id": str(r["list_id"]),
         "text": r["text"],
         "done": r["done"],
-        "deadline": r["deadline"].isoformat() if r["deadline"] else None,
-        "tag": r["tag"],
+        "done_at": r["done_at"].isoformat() if r["done_at"] else None,
+        "position": r["position"],
         "created_at": r["created_at"].isoformat(),
     }
 
@@ -396,57 +469,233 @@ async def health():
     return {"status": "ok"}
 
 
-@app.get("/api/todo/tasks")
-async def list_tasks():
-    async with pool.acquire() as c:
-        rows = await c.fetch("SELECT * FROM todo.tasks ORDER BY created_at")
-    return [to_task(r) for r in rows]
+async def _items_for(c, list_ids):
+    if not list_ids:
+        return []
+    rows = await c.fetch(
+        "SELECT * FROM todo.items WHERE list_id = ANY($1::uuid[]) ORDER BY position, created_at",
+        list_ids,
+    )
+    return [to_item(r) for r in rows]
 
 
-@app.post("/api/todo/tasks", status_code=201)
-async def create_task(t: TaskIn):
+@app.get("/api/todo/bootstrap")
+async def todo_bootstrap():
     async with pool.acquire() as c:
+        tags = await c.fetch("SELECT * FROM todo.tags ORDER BY name")
+        lists = await c.fetch(
+            "SELECT * FROM todo.lists WHERE NOT archived ORDER BY created_at DESC")
+        items = await _items_for(c, [r["id"] for r in lists])
+    return {
+        "tags": [to_todo_tag(t) for t in tags],
+        "lists": [to_list(l) for l in lists],
+        "items": items,
+    }
+
+
+@app.get("/api/todo/archive")
+async def todo_archive():
+    async with pool.acquire() as c:
+        lists = await c.fetch(
+            "SELECT * FROM todo.lists WHERE archived ORDER BY archived_at DESC NULLS LAST, created_at DESC")
+        items = await _items_for(c, [r["id"] for r in lists])
+    return {"lists": [to_list(l) for l in lists], "items": items}
+
+
+# ── теги ──────────────────────────────────────────────────────
+@app.post("/api/todo/tags", status_code=201)
+async def create_tag(t: TagIn):
+    name = t.name.strip()
+    if not name:
+        raise HTTPException(400, "Пустое название тега")
+    async with pool.acquire() as c:
+        exists = await c.fetchval("SELECT 1 FROM todo.tags WHERE lower(name) = lower($1)", name)
+        if exists:
+            raise HTTPException(409, "Тег с таким именем уже есть")
         r = await c.fetchrow(
-            "INSERT INTO todo.tasks (text, deadline, tag) "
-            "VALUES ($1, $2, $3) RETURNING *",
-            t.text, t.deadline, t.tag,
+            "INSERT INTO todo.tags (name, color) VALUES ($1, $2) RETURNING *",
+            name, _todo_color(t.color),
         )
-    return to_task(r)
+    return to_todo_tag(r)
 
 
-_ALLOWED = ("text", "done", "deadline", "tag")
-
-
-@app.patch("/api/todo/tasks/{task_id}")
-async def update_task(task_id: uuid.UUID, t: TaskPatch):
-    fields = {k: v for k, v in t.model_dump(exclude_unset=True).items() if k in _ALLOWED}
+@app.patch("/api/todo/tags/{tag_id}")
+async def update_tag(tag_id: uuid.UUID, t: TagPatch):
+    fields = t.model_dump(exclude_unset=True)
     if not fields:
         raise HTTPException(400, "Нет полей для обновления")
+    if "name" in fields:
+        fields["name"] = (fields["name"] or "").strip()
+        if not fields["name"]:
+            raise HTTPException(400, "Пустое название тега")
+    if "color" in fields:
+        fields["color"] = _todo_color(fields["color"])
     cols = list(fields.keys())
-    set_clause = ", ".join(f"{c} = ${i + 2}" for i, c in enumerate(cols))
-    values = [fields[c] for c in cols]
+    set_clause = ", ".join(f"{col} = ${i + 2}" for i, col in enumerate(cols))
     async with pool.acquire() as c:
+        try:
+            r = await c.fetchrow(
+                f"UPDATE todo.tags SET {set_clause} WHERE id = $1 RETURNING *",
+                tag_id, *[fields[col] for col in cols],
+            )
+        except asyncpg.UniqueViolationError:
+            raise HTTPException(409, "Тег с таким именем уже есть")
+    if not r:
+        raise HTTPException(404, "Тег не найден")
+    return to_todo_tag(r)
+
+
+@app.delete("/api/todo/tags/{tag_id}", status_code=204)
+async def delete_tag(tag_id: uuid.UUID):
+    async with pool.acquire() as c:
+        used = await c.fetchval("SELECT count(*) FROM todo.lists WHERE tag_id = $1", tag_id)
+        if used:
+            raise HTTPException(409, f"Тег используется в списках: {used}")
+        res = await c.execute("DELETE FROM todo.tags WHERE id = $1", tag_id)
+    if res.endswith("0"):
+        raise HTTPException(404, "Тег не найден")
+
+
+# ── списки ────────────────────────────────────────────────────
+async def _check_tag(c, tag_id):
+    if tag_id is not None:
+        ok = await c.fetchval("SELECT 1 FROM todo.tags WHERE id = $1", tag_id)
+        if not ok:
+            raise HTTPException(400, "Неизвестный тег")
+
+
+@app.post("/api/todo/lists", status_code=201)
+async def create_list(l: ListIn):
+    name = l.name.strip()
+    if not name:
+        raise HTTPException(400, "Пустое название списка")
+    if l.type not in _TODO_TYPES:
+        raise HTTPException(400, "Неизвестный тип списка")
+    auto_clear = l.auto_clear_min if l.type == "shopping" else None
+    if auto_clear is not None and auto_clear <= 0:
+        auto_clear = None
+    remind_at = l.remind_at if l.type == "once" else None
+    if l.type == "once" and remind_at is None:
+        raise HTTPException(400, "Для напоминания нужна дата/время")
+    async with pool.acquire() as c:
+        await _check_tag(c, l.tag_id)
         r = await c.fetchrow(
-            f"UPDATE todo.tasks SET {set_clause} WHERE id = $1 RETURNING *",
-            task_id, *values,
+            "INSERT INTO todo.lists (name, type, tag_id, auto_clear_min, remind_at) "
+            "VALUES ($1,$2,$3,$4,$5) RETURNING *",
+            name, l.type, l.tag_id, auto_clear, remind_at,
+        )
+    return to_list(r)
+
+
+@app.patch("/api/todo/lists/{list_id}")
+async def update_list(list_id: uuid.UUID, l: ListPatch):
+    fields = l.model_dump(exclude_unset=True)
+    if not fields:
+        raise HTTPException(400, "Нет полей для обновления")
+    if "name" in fields:
+        fields["name"] = (fields["name"] or "").strip()
+        if not fields["name"]:
+            raise HTTPException(400, "Пустое название списка")
+    async with pool.acquire() as c:
+        if "tag_id" in fields:
+            await _check_tag(c, fields["tag_id"])
+        if "archived" in fields:
+            fields["archived_at"] = _DT.now(tz=_TZ.utc) if fields["archived"] else None
+        cols = list(fields.keys())
+        set_clause = ", ".join(f"{col} = ${i + 2}" for i, col in enumerate(cols))
+        r = await c.fetchrow(
+            f"UPDATE todo.lists SET {set_clause} WHERE id = $1 RETURNING *",
+            list_id, *[fields[col] for col in cols],
         )
     if not r:
-        raise HTTPException(404, "Задача не найдена")
-    return to_task(r)
+        raise HTTPException(404, "Список не найден")
+    return to_list(r)
 
 
-@app.delete("/api/todo/tasks/{task_id}", status_code=204)
-async def delete_task(task_id: uuid.UUID):
+@app.delete("/api/todo/lists/{list_id}", status_code=204)
+async def delete_list(list_id: uuid.UUID):
     async with pool.acquire() as c:
-        res = await c.execute("DELETE FROM todo.tasks WHERE id = $1", task_id)
+        res = await c.execute("DELETE FROM todo.lists WHERE id = $1", list_id)
     if res.endswith("0"):
-        raise HTTPException(404, "Задача не найдена")
+        raise HTTPException(404, "Список не найден")
 
 
-@app.post("/api/todo/tasks/clear-done", status_code=204)
-async def clear_done():
+# ── строки ────────────────────────────────────────────────────
+@app.post("/api/todo/items", status_code=201)
+async def create_item(it: ItemIn):
+    text = it.text.strip()
+    if not text:
+        raise HTTPException(400, "Пустая строка")
     async with pool.acquire() as c:
-        await c.execute("DELETE FROM todo.tasks WHERE done")
+        ok = await c.fetchval("SELECT 1 FROM todo.lists WHERE id = $1", it.list_id)
+        if not ok:
+            raise HTTPException(400, "Список не найден")
+        pos = it.position
+        if pos is None:
+            pos = await c.fetchval(
+                "SELECT COALESCE(max(position)+1, 0) FROM todo.items WHERE list_id = $1", it.list_id)
+        r = await c.fetchrow(
+            "INSERT INTO todo.items (list_id, text, position) VALUES ($1,$2,$3) RETURNING *",
+            it.list_id, text, pos,
+        )
+    return to_item(r)
+
+
+@app.patch("/api/todo/items/{item_id}")
+async def update_item(item_id: uuid.UUID, it: ItemPatch):
+    fields = it.model_dump(exclude_unset=True)
+    if not fields:
+        raise HTTPException(400, "Нет полей для обновления")
+    if "text" in fields:
+        fields["text"] = (fields["text"] or "").strip()
+        if not fields["text"]:
+            raise HTTPException(400, "Пустая строка")
+    if "done" in fields:
+        fields["done_at"] = _DT.now(tz=_TZ.utc) if fields["done"] else None
+    cols = list(fields.keys())
+    set_clause = ", ".join(f"{col} = ${i + 2}" for i, col in enumerate(cols))
+    async with pool.acquire() as c:
+        r = await c.fetchrow(
+            f"UPDATE todo.items SET {set_clause} WHERE id = $1 RETURNING *",
+            item_id, *[fields[col] for col in cols],
+        )
+    if not r:
+        raise HTTPException(404, "Строка не найдена")
+    return to_item(r)
+
+
+@app.delete("/api/todo/items/{item_id}", status_code=204)
+async def delete_item(item_id: uuid.UUID):
+    async with pool.acquire() as c:
+        res = await c.execute("DELETE FROM todo.items WHERE id = $1", item_id)
+    if res.endswith("0"):
+        raise HTTPException(404, "Строка не найдена")
+
+
+# ── отправка списка покупок в Telegram ────────────────────────
+@app.post("/api/todo/lists/{list_id}/send-tg")
+async def send_list_tg(list_id: uuid.UUID):
+    token = (await get_setting("telegram_bot_token") or "").strip()
+    chat_id = (await get_setting("telegram_chat_id") or "").strip()
+    if not token or not chat_id:
+        raise HTTPException(400, "Не настроен бот/чат Telegram")
+    thread_id = (await get_setting("telegram_thread_id") or "").strip() or None
+    async with pool.acquire() as c:
+        lst = await c.fetchrow("SELECT * FROM todo.lists WHERE id = $1", list_id)
+        if not lst:
+            raise HTTPException(404, "Список не найден")
+        items = await c.fetch(
+            "SELECT text, done FROM todo.items WHERE list_id = $1 ORDER BY position, created_at", list_id)
+    lines = "\n".join(("✅ " if it["done"] else "☐ ") + it["text"] for it in items)
+    text = f"🛒 Список покупок: {lst['name']}"
+    if lines:
+        text += "\n\n" + lines
+    try:
+        await send_message(token, chat_id, text, thread_id=thread_id)
+    except Exception as e:
+        raise HTTPException(502, f"Ошибка отправки: {e}")
+    return {"ok": True, "count": len(items)}
+
 
 
 # ══════════════════════════════════════════════════════════════
@@ -615,7 +864,7 @@ def to_project(r) -> dict:
     }
 
 
-def to_tag(r) -> dict:
+def to_note_tag(r) -> dict:
     return {
         "id": str(r["id"]),
         "project_id": str(r["project_id"]),
@@ -696,7 +945,7 @@ async def notes_bootstrap():
         )
     return {
         "projects": [to_project(p) for p in projects],
-        "tags": [to_tag(t) for t in tags],
+        "tags": [to_note_tag(t) for t in tags],
         "notes": [to_note(n) for n in notes],
         "quick": [to_quick(q) for q in quick],
     }
@@ -757,7 +1006,7 @@ async def create_tag(t: TagIn):
             )
         except asyncpg.UniqueViolationError:
             raise HTTPException(409, "Тег с таким именем уже есть в проекте")
-    return to_tag(r)
+    return to_note_tag(r)
 
 
 @app.patch("/api/notes/tags/{tag_id}")
@@ -774,7 +1023,7 @@ async def update_tag(tag_id: uuid.UUID, t: TagPatch):
         )
     if not r:
         raise HTTPException(404, "Тег не найден")
-    return to_tag(r)
+    return to_note_tag(r)
 
 
 @app.delete("/api/notes/tags/{tag_id}", status_code=204)
@@ -1612,6 +1861,221 @@ async def delete_event_row(event_id: uuid.UUID):
         res = await c.execute("DELETE FROM evt.events WHERE id = $1", event_id)
     if res.endswith("0"):
         raise HTTPException(404, "Событие не найдено")
+
+
+# ══════════════════════════════════════════════════════════════
+#  ПЛАНИРОВЩИК ОПОВЕЩЕНИЙ (APScheduler — тик раз в минуту)
+#  Для каждого события вычисляет «слоты» отправки на сегодня и шлёт
+#  в Telegram те, что наступили и ещё не в evt.sent_log.
+#  Серия burst: burst_count отправок с шагом burst_interval_min мин,
+#  от базового времени (yearly — at_time в день события; daily — at_time).
+#  Прогрев yearly — раз в сутки в lead_time за lead_days до события.
+#  timezone, telegram_bot_token, telegram_chat_id, telegram_thread_id
+#  читаются из app.settings.
+# ══════════════════════════════════════════════════════════════
+DEFAULT_TZ = "Europe/Moscow"
+# Насколько «опоздавший» слот ещё допустимо отправить — защита от лавины,
+# если процесс простоял: после долгой паузы серию целиком не дошлём.
+SEND_CATCHUP_MIN = 30
+
+
+async def _scheduler_tz() -> ZoneInfo:
+    name = (await get_setting("timezone")) or DEFAULT_TZ
+    try:
+        return ZoneInfo(name)
+    except Exception:
+        return ZoneInfo(DEFAULT_TZ)
+
+
+def _parse_hhmm(s: str | None, default: str) -> tuple[int, int]:
+    raw = (s or "").strip() or default
+    try:
+        h, m = raw.split(":")
+        return int(h), int(m)
+    except Exception:
+        h, m = default.split(":")
+        return int(h), int(m)
+
+
+def _yearly_occ(today: Date, month: int, day: int) -> Date:
+    """Ближайшее наступление (сегодня или в будущем). 29.02 в невисокосный
+       год переносим на 28.02."""
+    def make(year):
+        d = day
+        if month == 2 and day == 29 and not calendar.isleap(year):
+            d = 28
+        return Date(year, month, d)
+    occ = make(today.year)
+    if occ < today:
+        occ = make(today.year + 1)
+    return occ
+
+
+def _ru_days(n: int) -> str:
+    m10, m100 = n % 10, n % 100
+    if m10 == 1 and m100 != 11:
+        return "день"
+    if 2 <= m10 <= 4 and not (12 <= m100 <= 14):
+        return "дня"
+    return "дней"
+
+
+def _burst_slots(ev, day: Date, tz, default_time, key_prefix, text):
+    """Слоты серии: (dedup_key, datetime, text) × burst_count."""
+    bh, bm = _parse_hhmm(ev["at_time"], default_time)
+    base = datetime(day.year, day.month, day.day, bh, bm, tzinfo=tz)
+    interval = ev["burst_interval_min"] or 0
+    count = max(1, ev["burst_count"] or 1)
+    return [
+        (f"{key_prefix}:{i}", base + timedelta(minutes=interval * i), text)
+        for i in range(count)
+    ]
+
+
+def _event_slots(ev, now: datetime):
+    """Список (dedup_key, scheduled_datetime, text) для события на сегодня.
+       Фильтр по времени/дедупу делает вызывающий."""
+    tz = now.tzinfo
+    today = now.date()
+    out = []
+
+    if ev["recur"] == "yearly":
+        if ev["month"] is None or ev["day"] is None:
+            return out
+        occ = _yearly_occ(today, ev["month"], ev["day"])
+        occ_key = str(occ.year)
+        if ev["acked_key"] == occ_key:        # подтверждено → молчим всю серию
+            return out
+        days_until = (occ - today).days
+
+        # прогрев: одно напоминание в сутки в lead_time
+        lead_days = ev["lead_days"] or 0
+        if lead_days > 0 and 0 < days_until <= lead_days:
+            # lead_daily=true → каждый день окна; иначе — единственный пинг за lead_days
+            if ev["lead_daily"] or days_until == lead_days:
+                lh, lm = _parse_hhmm(ev["lead_time"], "12:00")
+                when = datetime(today.year, today.month, today.day, lh, lm, tzinfo=tz)
+                date_str = f"{occ.day:02d}.{occ.month:02d}"
+                text = f"🔔 {ev['name']} — через {days_until} {_ru_days(days_until)} ({date_str})"
+                out.append((f"warm:{occ.isoformat()}:{today.isoformat()}", when, text))
+
+        # день события: серия burst от at_time (по умолчанию 09:00)
+        if days_until == 0:
+            out += _burst_slots(ev, today, tz, "09:00",
+                                f"day:{occ.isoformat()}", f"🎉 {ev['name']} — сегодня!")
+
+    else:  # daily — по дням недели (0=Пн … 6=Вс, совпадает с date.weekday())
+        wds = ev["weekdays"]
+        if wds and today.weekday() not in wds:
+            return out
+        if ev["acked_key"] == today.isoformat():
+            return out
+        out += _burst_slots(ev, today, tz, "09:00",
+                            f"daily:{today.isoformat()}", f"⏰ {ev['name']}")
+    return out
+
+
+async def _send_due(c, ev, dedup_key, text, token, chat_id, thread_id):
+    """Атомарно резервирует слот в логе, затем шлёт. Если отправка упала —
+       снимает резерв, чтобы повторить на следующем тике (в окне catch-up)."""
+    reserved = await c.fetchval(
+        "INSERT INTO evt.sent_log (event_id, dedup_key) VALUES ($1, $2) "
+        "ON CONFLICT (event_id, dedup_key) DO NOTHING RETURNING id",
+        ev["id"], dedup_key,
+    )
+    if not reserved:
+        return  # уже отправляли
+    try:
+        await send_message(token, chat_id, text, thread_id=thread_id)
+    except Exception as e:
+        await c.execute("DELETE FROM evt.sent_log WHERE id = $1", reserved)
+        print(f"[scheduler] отправка не удалась ({ev['name']}): {e}")
+
+
+async def _todo_tick(c, token, chat_id, thread_id):
+    """Todo-часть тика: автоочистка списков покупок и одноразовые напоминания."""
+    # 1) shopping: убрать отмеченные строки, у которых истёк auto_clear_min
+    cleared = await c.fetch(
+        "SELECT i.id, i.list_id FROM todo.items i "
+        "JOIN todo.lists l ON l.id = i.list_id "
+        "WHERE l.type = 'shopping' AND i.done AND i.done_at IS NOT NULL "
+        "  AND l.auto_clear_min IS NOT NULL "
+        "  AND i.done_at + make_interval(mins => l.auto_clear_min) <= now()"
+    )
+    if cleared:
+        await c.execute("DELETE FROM todo.items WHERE id = ANY($1::uuid[])",
+                        [r["id"] for r in cleared])
+        # если автоочистка убрала последнюю строку — удаляем список
+        for lid in {r["list_id"] for r in cleared}:
+            left = await c.fetchval("SELECT count(*) FROM todo.items WHERE list_id = $1", lid)
+            if left == 0:
+                await c.execute("DELETE FROM todo.lists WHERE id = $1", lid)
+
+    # 2) once: разовые напоминания, у которых наступило время
+    due = await c.fetch(
+        "SELECT * FROM todo.lists "
+        "WHERE type = 'once' AND NOT reminded AND remind_at IS NOT NULL AND remind_at <= now()"
+    )
+    for lst in due:
+        items = await c.fetch(
+            "SELECT text, done FROM todo.items WHERE list_id = $1 ORDER BY position, created_at",
+            lst["id"],
+        )
+        lines = "\n".join(("✅ " if it["done"] else "☐ ") + it["text"] for it in items)
+        text = f"⏰ {lst['name']}"
+        if lines:
+            text += "\n\n" + lines
+        try:
+            await send_message(token, chat_id, text, thread_id=thread_id)
+            await c.execute("UPDATE todo.lists SET reminded = true WHERE id = $1", lst["id"])
+        except Exception as e:
+            print(f"[scheduler] напоминание не отправлено ({lst['name']}): {e}")
+
+    # 3) сработавшие once → в архив (живут там до конца суток МСК)
+    await c.execute(
+        "UPDATE todo.lists "
+        "SET archived = true, archived_at = now() AT TIME ZONE 'Europe/Moscow' "
+        "WHERE type = 'once' AND reminded = true AND archived = false"
+    )
+
+    # 4) архивные once прошлых суток — удалить (items уйдут по ON DELETE CASCADE)
+    await c.execute(
+        "DELETE FROM todo.lists "
+        "WHERE type = 'once' AND reminded = true AND archived = true "
+        "  AND archived_at < date_trunc('day', now() AT TIME ZONE 'Europe/Moscow')"
+    )
+
+
+async def notify_tick():
+    """Тик раз в минуту: рассылает наступившие оповещения."""
+    if pool is None:
+        return
+    token = (await get_setting("telegram_bot_token") or "").strip()
+    chat_id = (await get_setting("telegram_chat_id") or "").strip()
+    if not token or not chat_id:
+        return  # бот/чат не настроены — молчим
+    thread_id = (await get_setting("telegram_thread_id") or "").strip() or None
+
+    now = datetime.now(await _scheduler_tz())
+    catchup = timedelta(minutes=SEND_CATCHUP_MIN)
+
+    async with pool.acquire() as c:
+        events = await c.fetch("SELECT * FROM evt.events")
+        for ev in events:
+            try:
+                for dedup_key, when, text in _event_slots(ev, now):
+                    delay = now - when
+                    # слот наступил (с допуском на пропущенные тики), не из будущего
+                    if timedelta(0) <= delay <= catchup:
+                        await _send_due(c, ev, dedup_key, text, token, chat_id, thread_id)
+            except Exception as e:
+                print(f"[scheduler] ошибка обработки события {ev.get('name')}: {e}")
+
+        # Todo: автоочистка покупок + одноразовые напоминания
+        try:
+            await _todo_tick(c, token, chat_id, thread_id)
+        except Exception as e:
+            print(f"[scheduler] ошибка todo-тика: {e}")
 
 
 # ── отдаём SPA ────────────────────────────────────────────────
