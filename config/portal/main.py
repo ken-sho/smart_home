@@ -1629,6 +1629,14 @@ def _norm_weekdays(weekdays):
     return clean or None
 
 
+def _norm_monthdays(monthdays):
+    """Чистим: 1–31, уникальные, сортировка. Пусто/None → None."""
+    if not monthdays:
+        return None
+    clean = sorted({d for d in monthdays if isinstance(d, int) and 1 <= d <= 31})
+    return clean or None
+
+
 def _clamp(v, lo, hi, default):
     if v is None:
         return default
@@ -1640,6 +1648,7 @@ class EventIn(BaseModel):
     recur: str = "yearly"
     color: str = "blue"
     weekdays: list[int] | None = None
+    monthdays: list[int] | None = None
     at_time: str | None = None
     burst_count: int = 1
     burst_interval_min: int = 0
@@ -1656,6 +1665,7 @@ class EventPatch(BaseModel):
     recur: str | None = None
     color: str | None = None
     weekdays: list[int] | None = None
+    monthdays: list[int] | None = None
     at_time: str | None = None
     burst_count: int | None = None
     burst_interval_min: int | None = None
@@ -1673,6 +1683,7 @@ class TemplateIn(BaseModel):
     recur: str = "yearly"
     color: str = "blue"
     weekdays: list[int] | None = None
+    monthdays: list[int] | None = None
     at_time: str | None = None
     burst_count: int = 1
     burst_interval_min: int = 0
@@ -1688,6 +1699,7 @@ def to_event(r) -> dict:
         "recur": r["recur"],
         "color": r["color"],
         "weekdays": list(r["weekdays"]) if r["weekdays"] is not None else None,
+        "monthdays": list(r["monthdays"]) if r["monthdays"] is not None else None,
         "at_time": r["at_time"],
         "burst_count": r["burst_count"],
         "burst_interval_min": r["burst_interval_min"],
@@ -1708,6 +1720,7 @@ def to_template(r) -> dict:
         "recur": r["recur"],
         "color": r["color"],
         "weekdays": list(r["weekdays"]) if r["weekdays"] is not None else None,
+        "monthdays": list(r["monthdays"]) if r["monthdays"] is not None else None,
         "at_time": r["at_time"],
         "burst_count": r["burst_count"],
         "burst_interval_min": r["burst_interval_min"],
@@ -1731,10 +1744,10 @@ async def events_bootstrap():
 
 
 # ── типы событий ──────────────────────────────────────────────
-def _tpl_fields(recur, color, weekdays, at_time, burst_count,
+def _tpl_fields(recur, color, weekdays, monthdays, at_time, burst_count,
                 burst_interval_min, lead_days, lead_daily, lead_time):
     """Нормализует общие поля конфигурации под выбранный режим."""
-    if recur not in ("yearly", "daily"):
+    if recur not in ("yearly", "daily", "monthly"):
         raise HTTPException(400, "Неизвестная повторяемость")
     out = {
         "recur": recur,
@@ -1742,14 +1755,21 @@ def _tpl_fields(recur, color, weekdays, at_time, burst_count,
         "at_time": _norm_time(at_time),
         "burst_count": _clamp(burst_count, 1, _BURST_MAX, 1),
         "burst_interval_min": _clamp(burst_interval_min, 0, 1440, 0),
+        # поля-списки инициализируем, переопределяем ниже по режиму
+        "weekdays": None,
+        "monthdays": None,
     }
     if recur == "daily":
         out["weekdays"] = _norm_weekdays(weekdays)
         out["lead_days"] = 0
         out["lead_daily"] = False
         out["lead_time"] = "12:00"
+    elif recur == "monthly":
+        out["monthdays"] = _norm_monthdays(monthdays)
+        out["lead_days"] = 0
+        out["lead_daily"] = False
+        out["lead_time"] = "12:00"
     else:  # yearly
-        out["weekdays"] = None
         out["lead_days"] = _clamp(lead_days, 0, 365, 0)
         out["lead_daily"] = bool(lead_daily)
         out["lead_time"] = _norm_time(lead_time) or "12:00"
@@ -1761,16 +1781,16 @@ async def create_template(t: TemplateIn):
     title = t.title.strip()
     if not title:
         raise HTTPException(400, "Пустое название шаблона")
-    f = _tpl_fields(t.recur, t.color, t.weekdays, t.at_time, t.burst_count,
+    f = _tpl_fields(t.recur, t.color, t.weekdays, t.monthdays, t.at_time, t.burst_count,
                     t.burst_interval_min, t.lead_days, t.lead_daily, t.lead_time)
     async with pool.acquire() as c:
         pos = await c.fetchval("SELECT COALESCE(max(position)+1, 0) FROM evt.templates")
         r = await c.fetchrow(
             "INSERT INTO evt.templates "
-            "(title, recur, color, weekdays, at_time, burst_count, burst_interval_min, "
+            "(title, recur, color, weekdays, monthdays, at_time, burst_count, burst_interval_min, "
             " lead_days, lead_daily, lead_time, position) "
-            "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *",
-            title, f["recur"], f["color"], f["weekdays"], f["at_time"], f["burst_count"],
+            "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *",
+            title, f["recur"], f["color"], f["weekdays"], f["monthdays"], f["at_time"], f["burst_count"],
             f["burst_interval_min"], f["lead_days"], f["lead_daily"], f["lead_time"], pos,
         )
     return to_template(r)
@@ -1790,7 +1810,7 @@ async def create_event(e: EventIn):
     name = e.name.strip()
     if not name:
         raise HTTPException(400, "Пустое имя/примечание")
-    f = _tpl_fields(e.recur, e.color, e.weekdays, e.at_time, e.burst_count,
+    f = _tpl_fields(e.recur, e.color, e.weekdays, e.monthdays, e.at_time, e.burst_count,
                     e.burst_interval_min, e.lead_days, e.lead_daily, e.lead_time)
     if e.recur == "yearly":
         if e.day is None or e.month is None:
@@ -1803,10 +1823,10 @@ async def create_event(e: EventIn):
     async with pool.acquire() as c:
         r = await c.fetchrow(
             "INSERT INTO evt.events "
-            "(name, recur, color, weekdays, at_time, burst_count, burst_interval_min, "
+            "(name, recur, color, weekdays, monthdays, at_time, burst_count, burst_interval_min, "
             " day, month, year, lead_days, lead_daily, lead_time) "
-            "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *",
-            name, f["recur"], f["color"], f["weekdays"], f["at_time"], f["burst_count"],
+            "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING *",
+            name, f["recur"], f["color"], f["weekdays"], f["monthdays"], f["at_time"], f["burst_count"],
             f["burst_interval_min"], day, month, year, f["lead_days"], f["lead_daily"], f["lead_time"],
         )
     return to_event(r)
@@ -1817,7 +1837,7 @@ async def update_event_row(event_id: uuid.UUID, e: EventPatch):
     fields = {k: v for k, v in e.model_dump(exclude_unset=True).items()}
     if not fields:
         raise HTTPException(400, "Нет полей для обновления")
-    if "recur" in fields and fields["recur"] not in ("yearly", "daily"):
+    if "recur" in fields and fields["recur"] not in ("yearly", "daily", "monthly"):
         raise HTTPException(400, "Неизвестная повторяемость")
     if "name" in fields:
         fields["name"] = (fields["name"] or "").strip()
@@ -1831,6 +1851,8 @@ async def update_event_row(event_id: uuid.UUID, e: EventPatch):
         fields["lead_time"] = _norm_time(fields["lead_time"]) or "12:00"
     if "weekdays" in fields:
         fields["weekdays"] = _norm_weekdays(fields["weekdays"])
+    if "monthdays" in fields:
+        fields["monthdays"] = _norm_monthdays(fields["monthdays"])
     if "burst_count" in fields:
         fields["burst_count"] = _clamp(fields["burst_count"], 1, _BURST_MAX, 1)
     if "burst_interval_min" in fields:
@@ -1965,6 +1987,21 @@ def _event_slots(ev, now: datetime):
                                 f"day:{occ.isoformat()}", f"🎉 {ev['name']} — сегодня!")
 
     else:  # daily — по дням недели (0=Пн … 6=Вс, совпадает с date.weekday())
+        if ev["recur"] == "monthly":
+            mds = ev["monthdays"]
+            last_dom = calendar.monthrange(today.year, today.month)[1]
+            dom = today.day
+            # число совпадает напрямую или выходит за длину месяца → последний день
+            hit = bool(mds) and any(
+                md == dom or (md > last_dom and dom == last_dom) for md in mds
+            )
+            if not hit:
+                return out
+            if ev["acked_key"] == today.isoformat():
+                return out
+            out += _burst_slots(ev, today, tz, "09:00",
+                                f"monthly:{today.isoformat()}", f"📅 {ev['name']}")
+            return out
         wds = ev["weekdays"]
         if wds and today.weekday() not in wds:
             return out
