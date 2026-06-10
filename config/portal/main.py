@@ -2097,6 +2097,21 @@ async def notify_tick():
     catchup = timedelta(minutes=SEND_CATCHUP_MIN)
 
     async with pool.acquire() as c:
+        # Чистим журнал дедупа за прошедшие дни (по началу суток МСК).
+        # Каждый dedup_key содержит дату своего слота (daily:YYYY-MM-DD:i,
+        # monthly:…, warm:…, day:…), а слот прошедшего дня планировщик
+        # заново НЕ генерирует — поэтому удаление старых строк безопасно и
+        # не вызовет повторную отправку. Без этого daily/monthly слоты
+        # рисковали залипнуть «уже отправлено» навсегда (баг дедупа), а
+        # таблица росла бы без предела.
+        # sent_at — timestamptz: приводим к московскому wall-clock, чтобы
+        # граница суток не зависела от сессионной TimeZone Postgres.
+        await c.execute(
+            "DELETE FROM evt.sent_log "
+            "WHERE sent_at AT TIME ZONE 'Europe/Moscow' "
+            "      < date_trunc('day', now() AT TIME ZONE 'Europe/Moscow')"
+        )
+
         events = await c.fetch("SELECT * FROM evt.events")
         for ev in events:
             try:
