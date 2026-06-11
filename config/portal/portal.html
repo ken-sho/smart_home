@@ -951,6 +951,10 @@ input[type=number]:focus { border-color: var(--accent); }
 .evt-filter-btn:hover { background: var(--surface2); color: var(--text); }
 .evt-filter-btn.active { background: var(--accent-bg); border-color: var(--accent); color: var(--accent-text); font-weight: 600; }
 
+/* режим защиты от удаления (RO+): добавлять и отмечать можно, удалять — нет */
+#evtLockToggle.active { color: var(--yellow); border-color: var(--yellow); background: var(--yellow-bg); }
+.evt-locked .evt-del, .evt-locked #evtList .task-del { display: none !important; }
+
 /* ══════════════════════════════
    GARAGE
 ══════════════════════════════ */
@@ -1996,6 +2000,7 @@ input[type=number]:focus { border-color: var(--accent); }
       <i class="ti ti-bell" id="evtHeadIcon" style="color:var(--accent)"></i>
       <span class="panel-title" id="evtTitle">События</span>
       <button class="icon-btn" id="evtAddToggle" title="Добавить событие"><i class="ti ti-plus"></i></button>
+      <button class="icon-btn" id="evtLockToggle" title="Защита от удаления"><i class="ti ti-lock-open"></i></button>
       <span class="conn-dot offline" id="evt-conn" title=""></span>
     </div>
 
@@ -2275,6 +2280,18 @@ input[type=number]:focus { border-color: var(--accent); }
                  placeholder="Europe/Moscow" autocomplete="off" spellcheck="false">
           <button class="btn-primary setting-save" data-key="timezone">Сохранить</button>
         </div>
+      </div>
+
+      <div class="settings-group-label"><i class="ti ti-bell"></i> Уведомления браузера</div>
+
+      <div class="setting-field">
+        <label class="setting-label">Уведомления о событиях</label>
+        <div class="setting-desc">Системные уведомления этого браузера, когда событие наступило. Работают, пока открыта вкладка или боковая панель портала. Клик по уведомлению подтверждает событие.</div>
+        <div class="setting-row">
+          <button class="btn-primary" id="notifyToggleBtn">Включить</button>
+          <button class="btn-ghost setting-test" id="notifyTestBtn"><i class="ti ti-bell-ringing"></i> Проверить</button>
+        </div>
+        <div class="setting-test-result" id="notifyResult"></div>
       </div>
     </div>
   </div>
@@ -3668,6 +3685,7 @@ setInterval(softRefresh, 5 * 60 * 1000);
 //  наступления, на след. год возвращается). Алертинг (Telegram) — отд. фаза.
 // ══════════════════════════════════════════
 let eventsOnline = false;
+let evtLocked = (localStorage.getItem('evtLocked') === '1');
 const EVT_COLORS = { blue: 'var(--blue)', green: 'var(--accent)', yellow: 'var(--yellow)', red: 'var(--red)', pink: '#d98fb0' };
 const EVT_COLOR_KEYS = ['blue', 'green', 'yellow', 'red', 'pink'];
 const EVT_MAX_DAY = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];   // 29.02 допускаем
@@ -3859,6 +3877,7 @@ async function removeEventRow(id) {
 }
 async function evtConfirmDelete(ev) {
   if (!eventsOnline) return;
+  if (evtLocked) { todoToast('Удаление заблокировано — снимите замок'); return; }
   if (!await confirmDialog({ title: 'Удалить событие', message: `Удалить событие «${ev.name}»?`, okText: 'Удалить', danger: true })) return;
   removeEventRow(ev.id);
 }
@@ -4275,6 +4294,26 @@ function closeEvtForm() {
 document.getElementById('evtAddToggle').onclick = () => {
   document.getElementById('evtAddForm').classList.contains('open') ? closeEvtForm() : openEvtForm();
 };
+
+// ── режим защиты от удаления (RO+) ──
+function applyEvtLock() {
+  const panel = document.getElementById('panel-birthdays');
+  if (panel) panel.classList.toggle('evt-locked', evtLocked);
+  const btn = document.getElementById('evtLockToggle');
+  if (btn) {
+    btn.classList.toggle('active', evtLocked);
+    btn.title = evtLocked ? 'Защита включена — удаление запрещено' : 'Защита от удаления';
+    const ic = btn.querySelector('i');
+    if (ic) ic.className = 'ti ' + (evtLocked ? 'ti-lock' : 'ti-lock-open');
+  }
+}
+document.getElementById('evtLockToggle').onclick = () => {
+  evtLocked = !evtLocked;
+  localStorage.setItem('evtLocked', evtLocked ? '1' : '0');
+  applyEvtLock();
+  todoToast(evtLocked ? 'Защита включена — удаление запрещено' : 'Защита снята — удаление разрешено');
+};
+applyEvtLock();
 document.getElementById('evtAddCancel').onclick = closeEvtForm;
 
 // ── фильтр ──
@@ -6201,6 +6240,174 @@ document.querySelectorAll('#settingsBody .secret-toggle').forEach(btn => {
     }
   });
 })();
+
+// ══════════════════════════════════════════
+//  БРАУЗЕРНЫЕ УВЕДОМЛЕНИЯ О СОБЫТИЯХ (Service Worker)
+//  SW регистрируется автоматически при загрузке страницы (переживает
+//  перезапуск браузера) и сам опрашивает /events/unacked в фоне, пока
+//  жив; страница опрашивает дополнительно, пока открыта вкладка/панель.
+//  Текст уведомления ОБЕЗЛИЧЕН (без имени события) — приватность на
+//  залоченном/общем экране. Клик → ack + фокус (обрабатывает sw.js).
+//  Переключатель — локальная настройка устройства: 'off' глушит фон
+//  (снимаем регистрацию SW и не регистрируем при загрузке).
+// ══════════════════════════════════════════
+const NOTIFY_LS = 'portal_notify';     // 'off' = выключено; иначе разрешено
+const NOTIFY_TITLE = 'Портал';
+const NOTIFY_BODY = 'У вас есть пропущенное событие на портале';
+let notifyTimer = null;
+let swReg = null;
+
+function notifyOff() { try { return localStorage.getItem(NOTIFY_LS) === 'off'; } catch (e) { return false; } }
+function notifySupported() { return ('serviceWorker' in navigator) && ('Notification' in window); }
+function notifyActive() { return notifySupported() && !notifyOff() && Notification.permission === 'granted'; }
+
+function setNotifyResult(cls, icon, text) {
+  const res = document.getElementById('notifyResult');
+  if (!res) return;
+  res.className = 'setting-test-result show ' + cls;
+  res.innerHTML = '<i class="ti ti-' + icon + '"></i><span></span>';
+  res.querySelector('span').textContent = text;
+}
+
+function updateNotifyBtn() {
+  const btn = document.getElementById('notifyToggleBtn');
+  if (!btn) return;
+  const on = notifyActive();
+  btn.textContent = on ? 'Выключить' : 'Включить';
+  btn.classList.toggle('btn-primary', !on);
+  btn.classList.toggle('btn-ghost', on);
+}
+
+async function notifyPoll() {
+  if (notifyOff() || !swReg) return;
+  if (!('Notification' in window) || Notification.permission !== 'granted') return;
+  let data;
+  try { data = await apiFetch('/events/unacked'); } catch (e) { return; }
+  const events = (data && data.events) || [];
+  updateTabBadge(events.length);
+  for (const ev of events) {
+    try {
+      await swReg.showNotification(NOTIFY_TITLE, {
+        body: NOTIFY_BODY,
+        tag: 'evt:' + ev.id,           // стабильный тег: одно уведомление на событие
+        renotify: true,                // пере-оповещает каждый опрос, пока не подтвердят
+        requireInteraction: true,
+        data: { event_id: ev.id, ack_url: API + '/events/' + ev.id + '/ack' },
+      });
+    } catch (e) { /* пропускаем сбойное уведомление */ }
+  }
+}
+
+// Бейдж иконки/панели (видимый, пока портал свёрнут): App Badging API.
+// Заголовок вкладки ведёт refreshFaviconBadge() из локального состояния —
+// дёргаем и его, чтобы (N) во вкладке оставался в синхроне.
+function updateTabBadge(count) {
+  try {
+    if ('setAppBadge' in navigator) {
+      if (count > 0) navigator.setAppBadge(count);
+      else if ('clearAppBadge' in navigator) navigator.clearAppBadge();
+    }
+  } catch (e) {}
+  try { if (typeof refreshFaviconBadge === 'function') refreshFaviconBadge(); } catch (e) {}
+}
+
+// Фоновый опрос идёт в Service Worker (живёт, пока вкладка/панель свёрнуты);
+// он шлёт сюда актуальное число неподтверждённых — обновляем бейдж без
+// открытия портала.
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.addEventListener('message', (e) => {
+    if (e.data && e.data.type === 'unacked_count') updateTabBadge(e.data.count);
+  });
+}
+
+function startNotifyPolling() {
+  stopNotifyPolling();
+  notifyPoll();
+  notifyTimer = setInterval(notifyPoll, 60000);
+}
+function stopNotifyPolling() {
+  if (notifyTimer) { clearInterval(notifyTimer); notifyTimer = null; }
+}
+
+async function registerNotifySW() {
+  const swUrl = new URL('sw.js', document.baseURI).href;     // /sw.js или /portal/sw.js
+  const scope = new URL('.', document.baseURI).href;          // каталог портала
+  await navigator.serviceWorker.register(swUrl, { scope });
+  await navigator.serviceWorker.ready;
+  swReg = (await navigator.serviceWorker.getRegistration(scope))
+       || (await navigator.serviceWorker.getRegistration());
+}
+
+async function enableNotifications() {
+  if (!notifySupported()) {
+    setNotifyResult('err', 'alert-circle', 'Браузер не поддерживает уведомления');
+    return;
+  }
+  let perm = Notification.permission;
+  if (perm === 'default') { try { perm = await Notification.requestPermission(); } catch (e) {} }
+  if (perm !== 'granted') {
+    setNotifyResult('err', 'alert-circle', 'Разрешение на уведомления не выдано');
+    return;
+  }
+  try { localStorage.removeItem(NOTIFY_LS); } catch (e) {}   // снимаем флаг 'off'
+  try { await registerNotifySW(); }
+  catch (e) { setNotifyResult('err', 'alert-circle', 'Не удалось включить (нужен HTTPS или localhost)'); return; }
+  updateNotifyBtn();
+  startNotifyPolling();
+  setNotifyResult('ok', 'circle-check', 'Уведомления включены');
+}
+
+async function disableNotifications() {
+  try { localStorage.setItem(NOTIFY_LS, 'off'); } catch (e) {}
+  stopNotifyPolling();
+  updateNotifyBtn();
+  if ('serviceWorker' in navigator) {
+    try {
+      const regs = await navigator.serviceWorker.getRegistrations();
+      for (const r of regs) await r.unregister();
+    } catch (e) {}
+  }
+  swReg = null;
+  setNotifyResult('pending', 'bell-off', 'Уведомления выключены');
+}
+
+(function wireNotify() {
+  const toggle = document.getElementById('notifyToggleBtn');
+  if (toggle) toggle.addEventListener('click', () => {
+    notifyActive() ? disableNotifications() : enableNotifications();
+  });
+  const test = document.getElementById('notifyTestBtn');
+  if (test) test.addEventListener('click', async () => {
+    if (!('Notification' in window)) { setNotifyResult('err', 'alert-circle', 'Не поддерживается'); return; }
+    let perm = Notification.permission;
+    if (perm === 'default') { try { perm = await Notification.requestPermission(); } catch (e) {} }
+    if (perm !== 'granted') { setNotifyResult('err', 'alert-circle', 'Нет разрешения'); return; }
+    const reg = swReg || (('serviceWorker' in navigator) ? await navigator.serviceWorker.getRegistration() : null);
+    const opts = { body: NOTIFY_BODY, tag: 'evt:test', requireInteraction: false };
+    try {
+      if (reg) await reg.showNotification(NOTIFY_TITLE, opts);
+      else new Notification(NOTIFY_TITLE, opts);
+      setNotifyResult('ok', 'circle-check', 'Уведомление отправлено');
+    } catch (e) { setNotifyResult('err', 'alert-circle', 'Не удалось показать'); }
+  });
+  // Вкладка снова активна / в фокусе — опрашиваем немедленно.
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) notifyPoll(); });
+  window.addEventListener('focus', () => notifyPoll());
+})();
+
+// Авто-регистрация Service Worker при загрузке страницы — чтобы фоновый
+// опрос и обработка кликов работали и после перезапуска браузера. Не
+// навязываем, только если пользователь явно выключил уведомления ('off').
+function initNotifyRegistration() {
+  updateNotifyBtn();
+  if (!('serviceWorker' in navigator) || notifyOff()) return;
+  registerNotifySW()
+    .then(() => { if (Notification.permission === 'granted') startNotifyPolling(); })
+    .catch(() => { /* нет HTTPS/scope — тихо пропускаем */ })
+    .finally(updateNotifyBtn);
+}
+if (document.readyState === 'complete') initNotifyRegistration();
+else window.addEventListener('load', initNotifyRegistration);
 
 // ══════════════════════════════════════════
 //  INIT

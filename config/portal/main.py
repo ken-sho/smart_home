@@ -52,6 +52,8 @@ else:
     DATABASE_URL = DATABASE_URL or "postgresql://postgres:postgres@localhost:5432/portal"
 BASE_DIR = Path(__file__).resolve().parent
 PORTAL_HTML = Path(os.getenv("PORTAL_HTML", BASE_DIR.parent / "portal.html"))
+# Service Worker для браузерных уведомлений — лежит рядом с portal.html.
+SW_JS = Path(os.getenv("SW_JS", PORTAL_HTML.parent / "sw.js"))
 # Публичный адрес портала (для кнопки Mini App и URL вебхука). Можно
 # переопределить через настройку portal_public_url в app.settings.
 PORTAL_PUBLIC_URL = os.getenv("PORTAL_PUBLIC_URL", "https://core.tail751bc9.ts.net").rstrip("/")
@@ -1885,6 +1887,41 @@ async def delete_event_row(event_id: uuid.UUID):
         raise HTTPException(404, "Событие не найдено")
 
 
+# ── браузерные уведомления (Service Worker) ──────────────────
+# Параллельный Telegram-каналу путь: SW/страница опрашивают unacked,
+# показывают системное уведомление и по клику дёргают /ack.
+@app.get("/api/events/unacked")
+async def events_unacked():
+    """События, у которых сегодня уже наступил «активный» слот (по времени)
+       и которые ещё не подтверждены. Прогрев yearly сюда НЕ попадает —
+       его подтверждение глушило бы сам день события (acked_key=год).
+       acked_key уже учтён внутри _event_slots."""
+    now = datetime.now(await _scheduler_tz())
+    async with pool.acquire() as c:
+        rows = await c.fetch("SELECT * FROM evt.events")
+    return {"events": [to_event(ev) for ev in rows if _event_unacked(ev, now)]}
+
+
+@app.post("/api/events/{event_id}/ack")
+async def ack_event(event_id: uuid.UUID):
+    """Подтвердить текущее наступление события (клик по уведомлению).
+       Ставит acked_key по текущему наступлению — оповещения (и браузер,
+       и Telegram-серия burst) по нему смолкнут до следующего раза."""
+    now = datetime.now(await _scheduler_tz())
+    async with pool.acquire() as c:
+        ev = await c.fetchrow("SELECT * FROM evt.events WHERE id = $1", event_id)
+        if not ev:
+            raise HTTPException(404, "Событие не найдено")
+        key = _event_ack_key(ev, now)
+        if key is None:
+            raise HTTPException(400, "Нечего подтверждать")
+        row = await c.fetchrow(
+            "UPDATE evt.events SET acked_key = $2 WHERE id = $1 RETURNING *",
+            event_id, key,
+        )
+    return to_event(row)
+
+
 # ══════════════════════════════════════════════════════════════
 #  ПЛАНИРОВЩИК ОПОВЕЩЕНИЙ (APScheduler — тик раз в минуту)
 #  Для каждого события вычисляет «слоты» отправки на сегодня и шлёт
@@ -2012,6 +2049,32 @@ def _event_slots(ev, now: datetime):
     return out
 
 
+def _event_unacked(ev, now: datetime) -> bool:
+    """True, если у события есть «активный» (наступивший по времени сегодня)
+       и ещё не подтверждённый слот. Прогрев (warm:) намеренно пропускаем:
+       его подтверждение через браузер не должно глушить сам день события.
+       acked_key уже отфильтрован внутри _event_slots (для подтверждённых
+       наступлений список пуст)."""
+    for dedup_key, when, _text in _event_slots(ev, now):
+        if dedup_key.startswith("warm:"):
+            continue
+        if when <= now:               # время первого слота серии уже пришло
+            return True
+    return False
+
+
+def _event_ack_key(ev, now: datetime) -> str | None:
+    """Ключ подтверждения текущего наступления (та же семантика, что у
+       acked_key в _event_slots): yearly → год наступления; daily/monthly →
+       сегодняшняя дата МСК. None — если yearly без даты (подтверждать нечего)."""
+    today = now.date()
+    if ev["recur"] == "yearly":
+        if ev["month"] is None or ev["day"] is None:
+            return None
+        return str(_yearly_occ(today, ev["month"], ev["day"]).year)
+    return today.isoformat()
+
+
 async def _send_due(c, ev, dedup_key, text, token, chat_id, thread_id):
     """Атомарно резервирует слот в логе, затем шлёт. Если отправка упала —
        снимает резерв, чтобы повторить на следующем тике (в окне catch-up)."""
@@ -2131,6 +2194,18 @@ async def notify_tick():
 
 
 # ── отдаём SPA ────────────────────────────────────────────────
+@app.get("/sw.js")
+async def service_worker():
+    """Service Worker для браузерных уведомлений. Отдаём из корня сайта,
+       чтобы scope покрывал весь портал. Service-Worker-Allowed: / —
+       разрешает контролировать любой путь даже при регистрации из /portal/."""
+    return FileResponse(
+        SW_JS,
+        media_type="application/javascript",
+        headers={"Cache-Control": "no-cache", "Service-Worker-Allowed": "/"},
+    )
+
+
 @app.get("/")
 async def index():
     return FileResponse(PORTAL_HTML)

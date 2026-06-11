@@ -108,6 +108,7 @@ services:
     ports:
       - "8443:443"
       - "8444:80"
+      - "8445:8443"
     restart: unless-stopped
   vaultwarden:
     container_name: vaultwarden
