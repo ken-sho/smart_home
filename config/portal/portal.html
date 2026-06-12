@@ -3660,6 +3660,7 @@ function portalBusy() {
   return false;
 }
 let softRefreshing = false;
+let lastSoftRefresh = Date.now();
 async function softRefresh() {
   if (softRefreshing || document.hidden || portalBusy()) return;
   softRefreshing = true;
@@ -3674,9 +3675,24 @@ async function softRefresh() {
     if (typeof loadNotesData === 'function') await loadNotesData();
     if (typeof loadGarage === 'function') await loadGarage();
   } catch (e) { /* тихо */ }
+  lastSoftRefresh = Date.now();
   softRefreshing = false;
 }
 setInterval(softRefresh, 5 * 60 * 1000);
+
+// В боковой панели Vivaldi (и Telegram WebView) фоновый таб глушит/замораживает
+// таймеры, поэтому setInterval может не срабатывать пока панель свёрнута.
+// Поэтому при каждом открытии панели/возврате во вкладку — принудительно освежаем.
+// Маленький дебаунс (2 сек) — только чтобы focus + visibilitychange + pageshow,
+// которые часто стреляют разом, не дёрнули API несколько раз подряд.
+function softRefreshOnWake() {
+  if (document.hidden) return;
+  if (Date.now() - lastSoftRefresh < 2 * 1000) return;
+  softRefresh();
+}
+document.addEventListener('visibilitychange', () => { if (!document.hidden) softRefreshOnWake(); });
+window.addEventListener('focus', softRefreshOnWake);
+window.addEventListener('pageshow', softRefreshOnWake);
 
 // ══════════════════════════════════════════
 //  EVENTS — оповещалка (БД-модуль; localStorage — кэш для офлайн-показа)
