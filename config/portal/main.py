@@ -30,7 +30,7 @@ from contextlib import asynccontextmanager
 
 import asyncpg
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, File, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -65,6 +65,7 @@ SCHEMA_FILES = [
     BASE_DIR / "finance_schema.sql",
     BASE_DIR / "garage_schema.sql",
     BASE_DIR / "cal_schema.sql",
+    BASE_DIR / "auth2fa_schema.sql",
 ]
 
 pool: asyncpg.Pool | None = None
@@ -2191,6 +2192,364 @@ async def notify_tick():
             await _todo_tick(c, token, chat_id, thread_id)
         except Exception as e:
             print(f"[scheduler] ошибка todo-тика: {e}")
+
+
+# ══════════════════════════════════════════════════════════════
+#  2FA API (схема auth2fa: accounts) — TOTP-коды, аналог
+#  Google Authenticator. ТОЛЬКО доверенная сеть (Tailscale), НЕ
+#  выставлять наружу через Funnel — secret хранится в открытом виде.
+#  secret НИКОГДА не возвращаем после сохранения: код считаем на бэке.
+# ══════════════════════════════════════════════════════════════
+import time as _time
+
+_2FA_ALGOS = {"SHA1", "SHA256", "SHA512"}
+
+
+def _norm_secret(s: str) -> str:
+    """Чистим base32-секрет: убираем пробелы/дефисы, апперкейс, без паддинга."""
+    return re.sub(r"[\s-]", "", (s or "")).upper().rstrip("=")
+
+
+def _norm_algo(a) -> str:
+    a = (a or "SHA1").upper()
+    return a if a in _2FA_ALGOS else "SHA1"
+
+
+def _norm_digits(d) -> int:
+    return 8 if int(d or 6) == 8 else 6
+
+
+def _make_totp(secret: str, algorithm: str, digits: int, period: int):
+    """pyotp.TOTP с нужным digest. Бросает понятную ошибку при битом секрете."""
+    import pyotp
+    return pyotp.TOTP(
+        secret,
+        digits=digits,
+        digest=getattr(hashlib, algorithm.lower(), hashlib.sha1),
+        interval=period,
+    )
+
+
+def _current_code(r) -> dict:
+    """Текущий код + сколько секунд до смены окна. Код невалидного секрета
+       заменяем на «••••••», чтобы не валить весь список."""
+    period = r["period"] or 30
+    now = int(_time.time())
+    expires_in = period - (now % period)
+    try:
+        code = _make_totp(r["secret"], r["algorithm"], r["digits"], period).now()
+    except Exception:
+        code = "•" * (r["digits"] or 6)
+    return {"code": code, "expires_in": expires_in}
+
+
+def to_2fa(r) -> dict:
+    """Публичное представление: БЕЗ secret. Содержит вычисленный код."""
+    cc = _current_code(r)
+    return {
+        "id": str(r["id"]),
+        "list_id": str(r["list_id"]) if r["list_id"] else None,
+        "issuer": r["issuer"],
+        "account": r["account"] or "",
+        "code": cc["code"],
+        "digits": r["digits"],
+        "period": r["period"],
+        "expires_in": cc["expires_in"],
+        "pinned": r["pinned"],
+        "position": r["position"],
+        "created_at": r["created_at"].isoformat(),
+    }
+
+
+def to_2fa_list(r) -> dict:
+    return {
+        "id": str(r["id"]),
+        "name": r["name"],
+        "position": r["position"],
+        "created_at": r["created_at"].isoformat(),
+    }
+
+
+async def _tfa_default_list(c):
+    """id первого списка; если списков нет — создаём «Основной»."""
+    lid = await c.fetchval(
+        "SELECT id FROM auth2fa.lists ORDER BY position, created_at LIMIT 1"
+    )
+    if lid is None:
+        lid = await c.fetchval(
+            "INSERT INTO auth2fa.lists (name, position) VALUES ('Основной', 0) RETURNING id"
+        )
+    return lid
+
+
+async def _tfa_resolve_list(c, list_id):
+    """Проверяет, что список существует; None → первый список."""
+    if list_id is not None:
+        ok = await c.fetchval("SELECT 1 FROM auth2fa.lists WHERE id = $1", list_id)
+        if ok:
+            return list_id
+    return await _tfa_default_list(c)
+
+
+class TfaListIn(BaseModel):
+    name: str
+
+
+class TfaListPatch(BaseModel):
+    name: str | None = None
+    position: int | None = None
+
+
+class TfaAccountIn(BaseModel):
+    issuer: str
+    account: str | None = ""
+    secret: str
+    algorithm: str | None = "SHA1"
+    digits: int | None = 6
+    period: int | None = 30
+    list_id: uuid.UUID | None = None
+
+
+class TfaAccountPatch(BaseModel):
+    issuer: str | None = None
+    account: str | None = None
+    pinned: bool | None = None
+    position: int | None = None
+    list_id: uuid.UUID | None = None
+
+
+class TfaImportItem(BaseModel):
+    issuer: str
+    account: str | None = ""
+    secret: str
+    algorithm: str | None = "SHA1"
+    digits: int | None = 6
+
+
+class TfaImportConfirm(BaseModel):
+    accounts: list[TfaImportItem]
+    list_id: uuid.UUID | None = None
+
+
+# ── списки + аккаунты с текущими кодами ───────────────────────
+@app.get("/api/2fa/accounts")
+async def tfa_accounts():
+    async with pool.acquire() as c:
+        await _tfa_default_list(c)            # гарантируем хотя бы один список
+        lists = await c.fetch(
+            "SELECT * FROM auth2fa.lists ORDER BY position, created_at"
+        )
+        rows = await c.fetch(
+            "SELECT * FROM auth2fa.accounts ORDER BY pinned DESC, position, created_at"
+        )
+    return {
+        "lists": [to_2fa_list(l) for l in lists],
+        "accounts": [to_2fa(r) for r in rows],
+    }
+
+
+# ── списки CRUD ───────────────────────────────────────────────
+@app.post("/api/2fa/lists", status_code=201)
+async def tfa_list_create(l: TfaListIn):
+    name = (l.name or "").strip()
+    if not name:
+        raise HTTPException(400, "Пустое название списка")
+    async with pool.acquire() as c:
+        pos = await c.fetchval("SELECT COALESCE(max(position)+1, 0) FROM auth2fa.lists")
+        r = await c.fetchrow(
+            "INSERT INTO auth2fa.lists (name, position) VALUES ($1, $2) RETURNING *",
+            name, pos,
+        )
+    return to_2fa_list(r)
+
+
+@app.patch("/api/2fa/lists/{list_id}")
+async def tfa_list_update(list_id: uuid.UUID, l: TfaListPatch):
+    fields = {k: v for k, v in l.model_dump(exclude_unset=True).items()}
+    if not fields:
+        raise HTTPException(400, "Нет полей для обновления")
+    if "name" in fields:
+        fields["name"] = (fields["name"] or "").strip()
+        if not fields["name"]:
+            raise HTTPException(400, "Пустое название списка")
+    cols = list(fields.keys())
+    set_clause = ", ".join(f"{col} = ${i + 2}" for i, col in enumerate(cols))
+    async with pool.acquire() as c:
+        r = await c.fetchrow(
+            f"UPDATE auth2fa.lists SET {set_clause} WHERE id = $1 RETURNING *",
+            list_id, *[fields[col] for col in cols],
+        )
+    if not r:
+        raise HTTPException(404, "Список не найден")
+    return to_2fa_list(r)
+
+
+@app.delete("/api/2fa/lists/{list_id}", status_code=204)
+async def tfa_list_delete(list_id: uuid.UUID):
+    """Удаляет список вместе с его ключами (ON DELETE CASCADE). Последний
+       список удалить нельзя — иначе ключам некуда деваться."""
+    async with pool.acquire() as c:
+        total = await c.fetchval("SELECT count(*) FROM auth2fa.lists")
+        if total <= 1:
+            raise HTTPException(409, "Нельзя удалить единственный список")
+        res = await c.execute("DELETE FROM auth2fa.lists WHERE id = $1", list_id)
+    if res.endswith("0"):
+        raise HTTPException(404, "Список не найден")
+
+
+# ── импорт из Google Authenticator: разбор QR (НЕ сохраняем) ──
+@app.post("/api/2fa/import/qr")
+async def tfa_import_qr(image: UploadFile = File(...)):
+    """Принимает скриншот QR (multipart). Детектит QR (opencv), парсит
+       otpauth-migration и возвращает превью аккаунтов. Изображение
+       обрабатывается в памяти и не сохраняется на диск."""
+    from google_auth_migration import parse_google_migration
+
+    raw = await image.read()
+    if not raw:
+        raise HTTPException(400, "Пустой файл")
+
+    # детект QR в памяти (opencv)
+    try:
+        import cv2
+        import numpy as np
+        arr = np.frombuffer(raw, np.uint8)
+        img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+        if img is None:
+            raise HTTPException(400, "Не удалось прочитать изображение")
+        detector = cv2.QRCodeDetector()
+        data, points, _ = detector.detectAndDecode(img)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"Ошибка детекта QR: {e}")
+    finally:
+        del raw  # не держим картинку в памяти дольше нужного
+
+    if not data:
+        raise HTTPException(422, "QR-код не найден на изображении")
+
+    try:
+        accounts = parse_google_migration(data)
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+
+    # превью: реальный secret нужен фронту для шага confirm (доверенная сеть),
+    # secret_preview — маскированный для показа на экране
+    preview = []
+    for a in accounts:
+        s = a["secret"]
+        masked = (s[:4] + "…" + s[-2:]) if len(s) > 7 else "••••"
+        preview.append({
+            "issuer": a["issuer"],
+            "account": a["account"],
+            "secret": s,
+            "secret_preview": masked,
+            "algorithm": a["algorithm"],
+            "digits": a["digits"],
+        })
+    return {"accounts": preview}
+
+
+# ── ручное добавление одного аккаунта ─────────────────────────
+@app.post("/api/2fa/accounts", status_code=201)
+async def tfa_create(a: TfaAccountIn):
+    issuer = (a.issuer or "").strip()
+    if not issuer:
+        raise HTTPException(400, "Укажите название сервиса")
+    secret = _norm_secret(a.secret)
+    if not secret:
+        raise HTTPException(400, "Пустой секрет")
+    algorithm = _norm_algo(a.algorithm)
+    digits = _norm_digits(a.digits)
+    period = int(a.period or 30)
+    if period <= 0:
+        period = 30
+    # проверяем, что секрет валидный base32 и код считается
+    try:
+        _make_totp(secret, algorithm, digits, period).now()
+    except Exception:
+        raise HTTPException(400, "Секрет не является корректным base32")
+    async with pool.acquire() as c:
+        lid = await _tfa_resolve_list(c, a.list_id)
+        pos = await c.fetchval("SELECT COALESCE(max(position)+1, 0) FROM auth2fa.accounts")
+        r = await c.fetchrow(
+            "INSERT INTO auth2fa.accounts "
+            "(issuer, account, secret, algorithm, digits, period, position, list_id) "
+            "VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *",
+            issuer, (a.account or "").strip(), secret, algorithm, digits, period, pos, lid,
+        )
+    return to_2fa(r)
+
+
+# ── подтверждение импорта: сохраняем выбранные аккаунты ───────
+@app.post("/api/2fa/import/confirm")
+async def tfa_import_confirm(payload: TfaImportConfirm):
+    if not payload.accounts:
+        raise HTTPException(400, "Нет аккаунтов для импорта")
+    saved = []
+    async with pool.acquire() as c:
+        async with c.transaction():
+            lid = await _tfa_resolve_list(c, payload.list_id)
+            pos = await c.fetchval("SELECT COALESCE(max(position)+1, 0) FROM auth2fa.accounts")
+            for it in payload.accounts:
+                issuer = (it.issuer or "").strip() or "Без названия"
+                secret = _norm_secret(it.secret)
+                if not secret:
+                    continue
+                algorithm = _norm_algo(it.algorithm)
+                digits = _norm_digits(it.digits)
+                try:
+                    _make_totp(secret, algorithm, digits, 30).now()
+                except Exception:
+                    continue  # битый секрет пропускаем
+                r = await c.fetchrow(
+                    "INSERT INTO auth2fa.accounts "
+                    "(issuer, account, secret, algorithm, digits, period, position, list_id) "
+                    "VALUES ($1,$2,$3,$4,$5,30,$6,$7) RETURNING *",
+                    issuer, (it.account or "").strip(), secret, algorithm, digits, pos, lid,
+                )
+                pos += 1
+                saved.append(to_2fa(r))
+    if not saved:
+        raise HTTPException(400, "Ни один аккаунт не удалось импортировать")
+    return {"accounts": saved}
+
+
+# ── правка (имя / закрепление / порядок) ──────────────────────
+@app.patch("/api/2fa/accounts/{account_id}")
+async def tfa_update(account_id: uuid.UUID, a: TfaAccountPatch):
+    fields = {k: v for k, v in a.model_dump(exclude_unset=True).items()}
+    if not fields:
+        raise HTTPException(400, "Нет полей для обновления")
+    if "issuer" in fields:
+        fields["issuer"] = (fields["issuer"] or "").strip()
+        if not fields["issuer"]:
+            raise HTTPException(400, "Пустое название сервиса")
+    if "account" in fields:
+        fields["account"] = (fields["account"] or "").strip()
+    async with pool.acquire() as c:
+        if "list_id" in fields and fields["list_id"] is not None:
+            ok = await c.fetchval("SELECT 1 FROM auth2fa.lists WHERE id = $1", fields["list_id"])
+            if not ok:
+                raise HTTPException(400, "Неизвестный список")
+        cols = list(fields.keys())
+        set_clause = ", ".join(f"{col} = ${i + 2}" for i, col in enumerate(cols))
+        r = await c.fetchrow(
+            f"UPDATE auth2fa.accounts SET {set_clause} WHERE id = $1 RETURNING *",
+            account_id, *[fields[col] for col in cols],
+        )
+    if not r:
+        raise HTTPException(404, "Аккаунт не найден")
+    return to_2fa(r)
+
+
+@app.delete("/api/2fa/accounts/{account_id}", status_code=204)
+async def tfa_delete(account_id: uuid.UUID):
+    async with pool.acquire() as c:
+        res = await c.execute("DELETE FROM auth2fa.accounts WHERE id = $1", account_id)
+    if res.endswith("0"):
+        raise HTTPException(404, "Аккаунт не найден")
 
 
 # ── отдаём SPA ────────────────────────────────────────────────

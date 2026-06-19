@@ -1243,13 +1243,14 @@ input[type=number]:focus { border-color: var(--accent); }
 /* — note cards — */
 .note-item {
   background: var(--surface);
-  border: 1px solid var(--border);
+  border: 1px solid var(--border2);
   border-radius: var(--radius);
-  margin-bottom: 5px;
+  margin-bottom: 9px;
   overflow: hidden;
-  transition: border-color .15s;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.28);
+  transition: border-color .15s, box-shadow .15s;
 }
-.note-item:hover { border-color: var(--border2); }
+.note-item:hover { border-color: rgba(255,255,255,0.18); box-shadow: 0 2px 7px rgba(0,0,0,0.35); }
 .note-item.pinned { border-color: var(--border2); }
 .note-header {
   padding: 8px 10px;
@@ -1257,10 +1258,12 @@ input[type=number]:focus { border-color: var(--accent); }
   align-items: center;
   gap: 7px;
   cursor: pointer;
+  background: var(--surface2);
+  border-bottom: 1px solid var(--border);
 }
 .note-type-icon { font-size: 14px; color: var(--text3); flex-shrink: 0; }
 .note-item[data-type="code"] .note-type-icon { color: var(--blue); }
-.note-title { flex: 1; font-size: 12px; font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.note-title { flex: 1; font-size: 13px; font-weight: 600; color: var(--text); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .note-lang {
   font-size: 9px;
   font-family: var(--mono);
@@ -1577,13 +1580,13 @@ input[type=number]:focus { border-color: var(--accent); }
 /* ── date dividers + chat-log ── */
 .date-divider {
   display: flex; align-items: center; gap: 9px;
-  margin: 14px 2px 9px;
-  color: var(--text3);
-  font-size: 10px; font-family: var(--mono);
-  text-transform: uppercase; letter-spacing: 0.5px;
+  margin: 18px 2px 11px;
+  color: var(--text2);
+  font-size: 10px; font-weight: 600; font-family: var(--mono);
+  text-transform: uppercase; letter-spacing: 0.6px;
 }
 .date-divider:first-child { margin-top: 2px; }
-.date-divider::before, .date-divider::after { content: ''; height: 1px; background: var(--border); flex: 1; }
+.date-divider::before, .date-divider::after { content: ''; height: 1px; background: var(--border2); flex: 1; }
 #panel-notes { position: relative; }
 .scroll-bottom-btn {
   position: absolute;
@@ -1868,6 +1871,115 @@ input[type=number]:focus { border-color: var(--accent); }
 .confirm-input:focus { border-color: var(--accent); }
 .btn-primary.danger { background: var(--red-bg); border-color: var(--red-border); color: var(--red); }
 .btn-primary.danger:hover { background: var(--red); color: #fff; }
+
+/* ════════════════════════════════
+   2FA (TOTP) — список кодов
+══════════════════════════════════ */
+#tfaList { padding: 12px; display: flex; flex-direction: column; gap: 9px; }
+.tfa-section-label {
+  font-size: 10px; font-weight: 700; letter-spacing: .8px; text-transform: uppercase;
+  color: var(--text3); padding: 4px 2px 1px; margin-top: 2px;
+  font-family: var(--mono);
+}
+.tfa-section-label:first-child { margin-top: 0; }
+.tfa-card {
+  position: relative; background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 10px 13px 11px; cursor: pointer;
+  transition: border-color .15s, background .15s; overflow: hidden;
+}
+.tfa-card:hover { border-color: var(--border2); background: var(--surface2); }
+.tfa-card:active { background: var(--surface3); }
+.tfa-head { display: flex; align-items: center; gap: 4px; min-height: 18px; }
+.tfa-issuer {
+  flex: 1; min-width: 0; font-size: 12.5px; font-weight: 600; color: var(--text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.tfa-act {
+  width: 24px; height: 24px; border: none; background: transparent; color: var(--text3);
+  border-radius: var(--radius-sm); cursor: pointer; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center; font-size: 15px;
+  opacity: 0; transition: opacity .15s, color .15s, background .15s;
+}
+.tfa-card:hover .tfa-act { opacity: 1; }
+.tfa-act:hover { background: var(--surface3); color: var(--text2); }
+.tfa-pin.on { opacity: 1; color: var(--accent); }
+.tfa-pin.on:hover { color: var(--accent); }
+.tfa-code {
+  font-family: var(--mono); font-size: 31px; font-weight: 500; letter-spacing: 1px;
+  color: var(--accent-text); line-height: 1.12; margin: 3px 0 2px;
+  font-variant-numeric: tabular-nums; user-select: none;
+}
+.tfa-foot { display: flex; align-items: flex-end; justify-content: space-between; gap: 10px; }
+.tfa-account {
+  font-size: 11px; color: var(--text2); white-space: nowrap; overflow: hidden;
+  text-overflow: ellipsis; min-width: 0; font-family: var(--mono);
+}
+.tfa-ring { width: 22px; height: 22px; flex-shrink: 0; transform: rotate(-90deg); }
+.tfa-ring-bg { fill: none; stroke: var(--border2); stroke-width: 3; }
+.tfa-ring-fg {
+  fill: none; stroke: var(--accent); stroke-width: 3; stroke-linecap: round;
+  transition: stroke-dashoffset .95s linear, stroke .3s;
+}
+.tfa-ring-fg.warn { stroke: var(--red); }
+.tfa-copied {
+  position: absolute; inset: 0; background: var(--accent-bg);
+  display: flex; align-items: center; justify-content: center;
+  color: var(--accent); font-size: 30px; opacity: 0; pointer-events: none;
+  transition: opacity .12s;
+}
+.tfa-card.copied .tfa-copied { opacity: 1; }
+.tfa-empty {
+  display: flex; flex-direction: column; align-items: center; text-align: center;
+  gap: 8px; padding: 48px 24px; color: var(--text2);
+}
+.tfa-empty i { font-size: 36px; color: var(--text3); }
+.tfa-empty-title { font-size: 14px; font-weight: 700; color: var(--text); }
+.tfa-empty-sub { font-size: 12px; color: var(--text3); line-height: 1.6; }
+
+/* 2FA modals */
+.tfa-tabs { display: flex; gap: 4px; background: var(--bg); padding: 3px; border-radius: var(--radius-sm); }
+.tfa-tab {
+  flex: 1; padding: 6px 8px; border: none; background: transparent; color: var(--text2);
+  font-size: 11.5px; font-weight: 600; border-radius: 4px; cursor: pointer; font-family: inherit;
+  transition: all .15s;
+}
+.tfa-tab.active { background: var(--surface2); color: var(--text); }
+.tfa-tabpane { display: flex; flex-direction: column; gap: 8px; }
+.tfa-tabpane input, .tfa-man-adv select {
+  width: 100%; font-size: 13px; background: var(--bg); border: 1px solid var(--border2);
+  border-radius: 5px; color: var(--text); padding: 8px 10px; outline: none; font-family: inherit;
+}
+.tfa-tabpane input:focus { border-color: var(--accent); }
+#tfaManSecret { font-family: var(--mono); letter-spacing: .5px; }
+.tfa-man-adv { display: flex; gap: 6px; }
+.tfa-man-adv select { width: 50%; cursor: pointer; }
+.tfa-man-error, .tfa-import-status { font-size: 11.5px; color: var(--text2); line-height: 1.4; }
+.tfa-man-error { color: var(--red); }
+.tfa-man-error:empty, .tfa-import-status:empty { display: none; }
+.tfa-drop {
+  border: 1.5px dashed var(--border2); border-radius: var(--radius);
+  padding: 22px 14px; text-align: center; cursor: pointer; color: var(--text2);
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  transition: border-color .15s, background .15s;
+}
+.tfa-drop:hover, .tfa-drop.drag { border-color: var(--accent); background: var(--accent-bg); }
+.tfa-drop i { font-size: 30px; color: var(--text3); }
+.tfa-drop:hover i, .tfa-drop.drag i { color: var(--accent); }
+.tfa-drop-main { font-size: 12.5px; color: var(--text2); line-height: 1.4; }
+.tfa-drop-sub { font-size: 10.5px; color: var(--text3); line-height: 1.4; }
+.tfa-preview { display: flex; flex-direction: column; gap: 5px; max-height: 220px; overflow-y: auto; }
+.tfa-preview:empty { display: none; }
+.tfa-preview-item {
+  display: flex; align-items: center; gap: 9px; padding: 7px 9px;
+  border: 1px solid var(--border); border-radius: var(--radius-sm); cursor: pointer;
+}
+.tfa-preview-item:hover { border-color: var(--border2); background: var(--surface2); }
+.tfa-preview-item input { width: 15px; height: 15px; flex-shrink: 0; accent-color: var(--accent); cursor: pointer; }
+.tfa-preview-info { min-width: 0; }
+.tfa-preview-name { font-size: 12.5px; font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tfa-preview-acc { font-size: 10.5px; color: var(--text3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tfa-preview-acc .mono { font-family: var(--mono); }
+.tfa-edit-label { font-size: 11px; color: var(--text3); margin-top: 2px; }
 </style>
 </head>
 <body>
@@ -1890,6 +2002,7 @@ input[type=number]:focus { border-color: var(--accent); }
   <button class="nav-btn" data-panel="calendar" title="Календарь"><i class="ti ti-calendar"></i></button>
   <button class="nav-btn" data-panel="garage" title="Гараж"><i class="ti ti-car"></i></button>
   <button class="nav-btn" data-panel="notes" title="Заметки"><i class="ti ti-notes"></i></button>
+  <button class="nav-btn" data-panel="auth2fa" title="2FA коды"><i class="ti ti-shield-lock"></i></button>
   <div class="nav-spacer"></div>
   <button class="nav-btn" id="settingsBtn" data-panel="settings" title="Настройки"><i class="ti ti-settings"></i></button>
 </nav>
@@ -2204,6 +2317,23 @@ input[type=number]:focus { border-color: var(--accent); }
     <button class="scroll-bottom-btn" id="scrollBottomBtn" title="К последним"><i class="ti ti-arrow-down"></i></button>
   </div>
 
+  <!-- ── 2FA (TOTP) ── -->
+  <div class="panel" id="panel-auth2fa" data-screen-label="2FA">
+    <div class="panel-header">
+      <i class="ti ti-shield-lock" style="color:var(--accent)"></i>
+      <span class="panel-title">2FA коды</span>
+      <span class="panel-meta" id="tfa-count"></span>
+      <span class="conn-dot offline" id="tfa-conn-dot" title=""></span>
+      <button class="icon-btn" id="tfaAddBtn" title="Добавить аккаунт"><i class="ti ti-plus"></i></button>
+    </div>
+    <div class="proj-bar">
+      <select id="tfaListSelect" class="proj-select"></select>
+      <button class="icon-btn" id="tfaAddListBtn" title="Новый список"><i class="ti ti-folder-plus"></i></button>
+      <button class="icon-btn" id="tfaEditListBtn" title="Список: переименовать / удалить"><i class="ti ti-dots"></i></button>
+    </div>
+    <div class="panel-body" id="tfaList"></div>
+  </div>
+
   <!-- ── SETTINGS ── -->
   <div class="panel" id="panel-settings" data-screen-label="Настройки">
     <div class="panel-header">
@@ -2334,6 +2464,74 @@ input[type=number]:focus { border-color: var(--accent); }
       <button class="btn-ghost danger" id="projectDeleteBtn" style="margin-right:auto; display:none">Удалить</button>
       <button class="btn-ghost" id="projectCancelBtn">Отмена</button>
       <button class="btn-primary" id="projectSaveBtn">Сохранить</button>
+    </div>
+  </div>
+</div>
+
+<!-- 2FA add modal (import / manual) -->
+<div class="modal-overlay" id="tfaModal">
+  <div class="modal" style="width:330px">
+    <div class="modal-title">Добавить 2FA</div>
+    <div class="tfa-tabs">
+      <button class="tfa-tab active" data-tfatab="import">Из Authenticator</button>
+      <button class="tfa-tab" data-tfatab="manual">Вручную</button>
+    </div>
+    <div class="tfa-tabpane" id="tfaPaneImport">
+      <div class="tfa-drop" id="tfaDrop">
+        <i class="ti ti-qrcode"></i>
+        <div class="tfa-drop-main">Перетащите скриншот QR<br>или нажмите, чтобы выбрать</div>
+        <div class="tfa-drop-sub">Google Authenticator → «Перенести аккаунты» → экспорт</div>
+      </div>
+      <input type="file" id="tfaFile" accept="image/*" hidden>
+      <div class="tfa-import-status" id="tfaImportStatus"></div>
+      <div class="tfa-preview" id="tfaPreview"></div>
+      <div class="modal-actions">
+        <button class="btn-ghost" id="tfaImportCancel">Отмена</button>
+        <button class="btn-primary" id="tfaImportConfirm" disabled>Импортировать</button>
+      </div>
+    </div>
+    <div class="tfa-tabpane" id="tfaPaneManual" style="display:none">
+      <input type="text" id="tfaManIssuer" placeholder="Сервис (напр. Google)" maxlength="60" autocomplete="off">
+      <input type="text" id="tfaManAccount" placeholder="Аккаунт / email (необязательно)" maxlength="80" autocomplete="off">
+      <input type="text" id="tfaManSecret" placeholder="Секрет (base32)" autocomplete="off" spellcheck="false">
+      <div class="tfa-man-adv">
+        <select id="tfaManAlgo"><option>SHA1</option><option>SHA256</option><option>SHA512</option></select>
+        <select id="tfaManDigits"><option value="6">6 цифр</option><option value="8">8 цифр</option></select>
+      </div>
+      <div class="tfa-man-error" id="tfaManError"></div>
+      <div class="modal-actions">
+        <button class="btn-ghost" id="tfaManCancel">Отмена</button>
+        <button class="btn-primary" id="tfaManSave">Добавить</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 2FA edit modal -->
+<div class="modal-overlay" id="tfaEditModal">
+  <div class="modal">
+    <div class="modal-title">Аккаунт</div>
+    <input type="text" id="tfaEditIssuer" placeholder="Сервис" maxlength="60" style="width:100%" autocomplete="off">
+    <input type="text" id="tfaEditAccount" placeholder="Аккаунт / email" maxlength="80" style="width:100%" autocomplete="off">
+    <label class="tfa-edit-label">Список</label>
+    <select id="tfaEditList" class="proj-select" style="width:100%"></select>
+    <div class="modal-actions">
+      <button class="btn-ghost danger" id="tfaEditDelete" style="margin-right:auto">Удалить</button>
+      <button class="btn-ghost" id="tfaEditCancel">Отмена</button>
+      <button class="btn-primary" id="tfaEditSave">Сохранить</button>
+    </div>
+  </div>
+</div>
+
+<!-- 2FA list (group) add/edit modal -->
+<div class="modal-overlay" id="tfaListModal">
+  <div class="modal">
+    <div class="modal-title" id="tfaListModalTitle">Новый список</div>
+    <input type="text" id="tfaListNameInput" placeholder="Название списка" style="width:100%" maxlength="40" autocomplete="off">
+    <div class="modal-actions">
+      <button class="btn-ghost danger" id="tfaListDeleteBtn" style="margin-right:auto; display:none">Удалить</button>
+      <button class="btn-ghost" id="tfaListCancelBtn">Отмена</button>
+      <button class="btn-primary" id="tfaListSaveBtn">Сохранить</button>
     </div>
   </div>
 </div>
@@ -3674,6 +3872,7 @@ async function softRefresh() {
     }
     if (typeof loadNotesData === 'function') await loadNotesData();
     if (typeof loadGarage === 'function') await loadGarage();
+    if (typeof load2faData === 'function') await load2faData();
   } catch (e) { /* тихо */ }
   lastSoftRefresh = Date.now();
   softRefreshing = false;
@@ -6006,9 +6205,15 @@ function openNoteInWindow(n) {
   const script = isCode ? `<script>${POPOUT_COPY_JS}<\/script>` : '';
   const doc = `<!DOCTYPE html><html lang="ru"><head><meta charset="UTF-8"><title>${title}</title><style>${POPOUT_CSS}</style></head><body class="${isCode ? 'is-code' : 'is-text'}"><header><h1>${title}</h1>${langTag}${copyBtn}</header><main>${bodyHtml}</main>${script}</body></html>`;
   const url = URL.createObjectURL(new Blob([doc], { type: 'text/html' }));
-  // В основном окне браузера — отдельное окно (popup). В sidebar window.open не срабатывает → откроем вкладкой.
+  // В боковой панели Vivaldi (узкое окно) window.open возвращает «мёртвое»
+  // окно, которое никогда не загружается, поэтому popup там бесполезен —
+  // открываем новой вкладкой основного браузера (надёжно по клику-жесту).
+  // В обычном широком окне пробуем настоящий отдельный popup, с фолбэком.
+  const sidebar = window.innerWidth < 600;
   let w = null;
-  try { w = window.open(url, 'note_' + n.id, 'popup=yes,width=900,height=720,menubar=no,toolbar=no,location=no,status=no'); } catch (e) { w = null; }
+  if (!sidebar) {
+    try { w = window.open(url, 'note_' + n.id, 'popup=yes,width=900,height=720,menubar=no,toolbar=no,location=no,status=no'); } catch (e) { w = null; }
+  }
   if (w) { try { w.focus(); } catch (e) {} } else { openInNewTab(url); }
   setTimeout(() => URL.revokeObjectURL(url), 60000);
 }
@@ -6426,6 +6631,439 @@ if (document.readyState === 'complete') initNotifyRegistration();
 else window.addEventListener('load', initNotifyRegistration);
 
 // ══════════════════════════════════════════
+//  2FA — TOTP коды (БД-модуль, online-only)
+//  Коды считает бэкенд; фронт каждую секунду гонит обратный
+//  отсчёт по кольцу, а на смене окна (period сек) тянет новые.
+// ══════════════════════════════════════════
+let tfaOnline = false;
+let tfaAccounts = [];
+let tfaLists = [];
+let tfaCurrentList = null;
+let tfaRefreshing = false;
+const TFA_RING_C = 2 * Math.PI * 15.5;   // длина окружности r=15.5 ≈ 97.39
+const TFA_LIST_KEY = 'portal_tfa_list';  // выбранный список — память браузера
+
+function tfaUpdateStatus() {
+  const d = document.getElementById('tfa-conn-dot');
+  if (d) {
+    d.className = 'conn-dot ' + (tfaOnline ? 'online' : 'offline');
+    d.title = tfaOnline ? 'Подключено к БД' : 'БД недоступна';
+  }
+  ['tfaAddBtn', 'tfaAddListBtn', 'tfaEditListBtn'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) { el.disabled = !tfaOnline; el.classList.toggle('disabled', !tfaOnline); }
+  });
+  const sel = document.getElementById('tfaListSelect');
+  if (sel) sel.disabled = !tfaOnline;
+  const cnt = document.getElementById('tfa-count');
+  if (cnt) cnt.textContent = (tfaOnline && tfaCurrentAccounts().length) ? tfaCurrentAccounts().length : '';
+}
+
+function tfaStampWindows() {
+  const epoch = Math.floor(Date.now() / 1000);
+  tfaAccounts.forEach(a => { a._window = Math.floor(epoch / (a.period || 30)); });
+}
+
+function tfaRestoreCurrentList() {
+  let saved = null;
+  try { saved = localStorage.getItem(TFA_LIST_KEY); } catch (e) {}
+  if (saved && tfaLists.find(l => l.id === saved)) {
+    tfaCurrentList = saved;
+  } else if (!tfaCurrentList || !tfaLists.find(l => l.id === tfaCurrentList)) {
+    tfaCurrentList = tfaLists[0] ? tfaLists[0].id : null;
+  }
+}
+
+function tfaPersistCurrentList() {
+  try { if (tfaCurrentList) localStorage.setItem(TFA_LIST_KEY, tfaCurrentList); } catch (e) {}
+}
+
+function tfaCurrentAccounts() {
+  return tfaAccounts.filter(a => a.list_id === tfaCurrentList);
+}
+
+async function load2faData() {
+  try {
+    const data = await apiFetch('/2fa/accounts');
+    tfaAccounts = data.accounts || [];
+    tfaLists = data.lists || [];
+    tfaOnline = true;
+    tfaRestoreCurrentList();
+    tfaStampWindows();
+  } catch (e) {
+    tfaOnline = false;
+    tfaAccounts = [];
+    tfaLists = [];
+    tfaCurrentList = null;
+  }
+  tfaUpdateStatus();
+  renderTfaListSelect();
+  renderTfa();
+}
+
+function renderTfaListSelect() {
+  const sel = document.getElementById('tfaListSelect');
+  if (!sel) return;
+  const sorted = [...tfaLists].sort((a, b) => a.position - b.position);
+  sel.innerHTML = sorted.map(l => `<option value="${l.id}">${escapeHtml(l.name)}</option>`).join('');
+  if (!tfaCurrentList || !tfaLists.find(l => l.id === tfaCurrentList)) {
+    tfaCurrentList = sorted[0] ? sorted[0].id : null;
+  }
+  sel.value = tfaCurrentList || '';
+}
+
+document.getElementById('tfaListSelect').onchange = (e) => {
+  tfaCurrentList = e.target.value || null;
+  tfaPersistCurrentList();
+  tfaUpdateStatus();
+  renderTfa();
+};
+
+function tfaFmtCode(code) {
+  if (/^\d{6}$/.test(code)) return code.slice(0, 3) + ' ' + code.slice(3);
+  if (/^\d{8}$/.test(code)) return code.slice(0, 4) + ' ' + code.slice(4);
+  return code;
+}
+
+function tfaCardHtml(a) {
+  return `<div class="tfa-card" data-id="${a.id}">
+    <div class="tfa-head">
+      <span class="tfa-issuer">${escapeHtml(a.issuer)}</span>
+      <button class="tfa-act tfa-pin ${a.pinned ? 'on' : ''}" title="${a.pinned ? 'Открепить' : 'Закрепить'}"><i class="ti ti-pin"></i></button>
+      <button class="tfa-act tfa-menu" title="Изменить"><i class="ti ti-dots-vertical"></i></button>
+    </div>
+    <div class="tfa-code">${tfaFmtCode(a.code)}</div>
+    <div class="tfa-foot">
+      <span class="tfa-account">${escapeHtml(a.account || '')}</span>
+      <svg class="tfa-ring" viewBox="0 0 36 36" aria-hidden="true">
+        <circle class="tfa-ring-bg" cx="18" cy="18" r="15.5"></circle>
+        <circle class="tfa-ring-fg" cx="18" cy="18" r="15.5" stroke-dasharray="${TFA_RING_C.toFixed(2)}" stroke-dashoffset="0"></circle>
+      </svg>
+    </div>
+    <div class="tfa-copied"><i class="ti ti-check"></i></div>
+  </div>`;
+}
+
+function renderTfa() {
+  const el = document.getElementById('tfaList');
+  if (!el) return;
+  if (!tfaOnline) { el.innerHTML = ''; el.appendChild(dbErrorBanner(load2faData)); return; }
+  const list = tfaCurrentAccounts();
+  if (!list.length) {
+    el.innerHTML = `<div class="tfa-empty"><i class="ti ti-shield-lock"></i>
+      <div class="tfa-empty-title">Список пуст</div>
+      <div class="tfa-empty-sub">Добавьте ключ по кнопке + сверху:<br>импорт из Google Authenticator или вручную.</div></div>`;
+    return;
+  }
+  const pinned = list.filter(a => a.pinned);
+  const rest = list.filter(a => !a.pinned);
+  let html = '';
+  if (pinned.length) {
+    html += `<div class="tfa-section-label">Закреплённые</div>` + pinned.map(tfaCardHtml).join('');
+    if (rest.length) html += `<div class="tfa-section-label">Все</div>`;
+  }
+  html += rest.map(tfaCardHtml).join('');
+  el.innerHTML = html;
+
+  el.querySelectorAll('.tfa-card').forEach(card => {
+    const id = card.dataset.id;
+    card.addEventListener('click', (e) => {
+      if (e.target.closest('.tfa-act')) return;
+      tfaCopy(id, card);
+    });
+    card.querySelector('.tfa-pin').addEventListener('click', (e) => { e.stopPropagation(); tfaTogglePin(id); });
+    card.querySelector('.tfa-menu').addEventListener('click', (e) => { e.stopPropagation(); openTfaEdit(id); });
+    let lp = null;
+    card.addEventListener('pointerdown', () => { lp = setTimeout(() => openTfaEdit(id), 550); });
+    ['pointerup', 'pointerleave', 'pointercancel', 'pointermove'].forEach(ev =>
+      card.addEventListener(ev, () => { if (lp) { clearTimeout(lp); lp = null; } }));
+  });
+  tfaTick();
+}
+
+function tfaTick() {
+  if (!tfaOnline || !tfaAccounts.length) return;
+  const el = document.getElementById('tfaList');
+  if (!el) return;
+  const epoch = Math.floor(Date.now() / 1000);
+  let flipped = false;
+  tfaAccounts.forEach(a => {
+    const p = a.period || 30;
+    const w = Math.floor(epoch / p);
+    if (a._window === undefined) a._window = w;
+    if (w !== a._window) flipped = true;
+    const remaining = p - (epoch % p);
+    a.expires_in = remaining;
+    const fg = el.querySelector(`.tfa-card[data-id="${a.id}"] .tfa-ring-fg`);
+    if (fg) {
+      fg.style.strokeDashoffset = (TFA_RING_C * (1 - remaining / p)).toFixed(2);
+      fg.classList.toggle('warn', remaining <= 5);
+    }
+  });
+  if (flipped && !tfaRefreshing) {
+    tfaStampWindows();           // оптимистично, чтобы не дёргать API повторно
+    tfaRefreshing = true;
+    load2faData().finally(() => { tfaRefreshing = false; });
+  }
+}
+
+function tfaCopy(id, card) {
+  const a = tfaAccounts.find(x => x.id === id);
+  if (!a || !a.code) return;
+  copyTextSafe(a.code).then(() => {
+    card.classList.add('copied');
+    setTimeout(() => card.classList.remove('copied'), 900);
+    todoToast('Код скопирован');
+  }).catch(() => todoToast('Не удалось скопировать'));
+}
+
+async function tfaTogglePin(id) {
+  const a = tfaAccounts.find(x => x.id === id);
+  if (!a || !tfaOnline) return;
+  try {
+    const upd = await apiFetch('/2fa/accounts/' + id, { method: 'PATCH', headers: JH, body: JSON.stringify({ pinned: !a.pinned }) });
+    Object.assign(a, upd);
+  } catch (e) { tfaOnline = false; tfaUpdateStatus(); }
+  renderTfa();
+}
+
+// ── edit / delete ──
+let tfaEditId = null;
+function openTfaEdit(id) {
+  const a = tfaAccounts.find(x => x.id === id);
+  if (!a) return;
+  tfaEditId = id;
+  document.getElementById('tfaEditIssuer').value = a.issuer || '';
+  document.getElementById('tfaEditAccount').value = a.account || '';
+  const lsel = document.getElementById('tfaEditList');
+  const sorted = [...tfaLists].sort((x, y) => x.position - y.position);
+  lsel.innerHTML = sorted.map(l => `<option value="${l.id}">${escapeHtml(l.name)}</option>`).join('');
+  lsel.value = a.list_id || (sorted[0] ? sorted[0].id : '');
+  document.getElementById('tfaEditModal').classList.add('open');
+  setTimeout(() => document.getElementById('tfaEditIssuer').focus(), 30);
+}
+document.getElementById('tfaEditCancel').onclick = () => document.getElementById('tfaEditModal').classList.remove('open');
+document.getElementById('tfaEditSave').onclick = async () => {
+  if (!tfaEditId) return;
+  const issuer = document.getElementById('tfaEditIssuer').value.trim();
+  if (!issuer) { todoToast('Укажите название сервиса'); return; }
+  const account = document.getElementById('tfaEditAccount').value.trim();
+  const list_id = document.getElementById('tfaEditList').value || null;
+  try {
+    const upd = await apiFetch('/2fa/accounts/' + tfaEditId, { method: 'PATCH', headers: JH, body: JSON.stringify({ issuer, account, list_id }) });
+    const a = tfaAccounts.find(x => x.id === tfaEditId);
+    if (a) Object.assign(a, upd);
+  } catch (e) { tfaOnline = false; tfaUpdateStatus(); }
+  document.getElementById('tfaEditModal').classList.remove('open');
+  renderTfa(); tfaUpdateStatus();
+};
+document.getElementById('tfaEditDelete').onclick = async () => {
+  if (!tfaEditId) return;
+  const a = tfaAccounts.find(x => x.id === tfaEditId);
+  if (!await confirmDialog({ title: 'Удалить аккаунт', message: `Удалить «${a ? a.issuer : ''}»? Код для входа пропадёт.`, okText: 'Удалить', danger: true })) return;
+  try { await apiFetch('/2fa/accounts/' + tfaEditId, { method: 'DELETE' }); } catch (e) { tfaOnline = false; tfaUpdateStatus(); return; }
+  tfaAccounts = tfaAccounts.filter(x => x.id !== tfaEditId);
+  document.getElementById('tfaEditModal').classList.remove('open');
+  renderTfa(); tfaUpdateStatus();
+};
+
+// ── add modal: tabs ──
+document.querySelectorAll('.tfa-tab').forEach(t => t.onclick = () => {
+  document.querySelectorAll('.tfa-tab').forEach(x => x.classList.toggle('active', x === t));
+  const tab = t.dataset.tfatab;
+  document.getElementById('tfaPaneImport').style.display = tab === 'import' ? '' : 'none';
+  document.getElementById('tfaPaneManual').style.display = tab === 'manual' ? '' : 'none';
+});
+document.getElementById('tfaAddBtn').onclick = () => { if (tfaOnline) openTfaModal(); };
+function openTfaModal() {
+  tfaResetImport();
+  ['tfaManIssuer', 'tfaManAccount', 'tfaManSecret'].forEach(id => document.getElementById(id).value = '');
+  document.getElementById('tfaManAlgo').value = 'SHA1';
+  document.getElementById('tfaManDigits').value = '6';
+  document.getElementById('tfaManError').textContent = '';
+  document.querySelector('.tfa-tab[data-tfatab="import"]').click();
+  document.getElementById('tfaModal').classList.add('open');
+}
+document.getElementById('tfaManCancel').onclick = () => document.getElementById('tfaModal').classList.remove('open');
+document.getElementById('tfaImportCancel').onclick = () => document.getElementById('tfaModal').classList.remove('open');
+
+// close add/edit modals on backdrop click
+['tfaModal', 'tfaEditModal', 'tfaListModal'].forEach(id => {
+  const ov = document.getElementById(id);
+  ov.addEventListener('click', (e) => { if (e.target === ov) ov.classList.remove('open'); });
+});
+
+// ── manual add ──
+document.getElementById('tfaManSave').onclick = async () => {
+  const issuer = document.getElementById('tfaManIssuer').value.trim();
+  const account = document.getElementById('tfaManAccount').value.trim();
+  const secret = document.getElementById('tfaManSecret').value.trim();
+  const algorithm = document.getElementById('tfaManAlgo').value;
+  const digits = parseInt(document.getElementById('tfaManDigits').value, 10) || 6;
+  const errEl = document.getElementById('tfaManError');
+  errEl.textContent = '';
+  if (!issuer) { errEl.textContent = 'Укажите сервис'; return; }
+  if (!secret) { errEl.textContent = 'Укажите секрет'; return; }
+  try {
+    const a = await apiFetch('/2fa/accounts', { method: 'POST', headers: JH, body: JSON.stringify({ issuer, account, secret, algorithm, digits, list_id: tfaCurrentList }) });
+    tfaAccounts.push(a);
+    tfaStampWindows();
+    document.getElementById('tfaModal').classList.remove('open');
+    renderTfa(); tfaUpdateStatus();
+    todoToast('Аккаунт добавлен');
+  } catch (e) {
+    errEl.textContent = 'Не удалось добавить — проверьте секрет (base32)';
+  }
+};
+
+// ── import from Google Authenticator QR ──
+let tfaPreviewData = [];
+function tfaResetImport() {
+  tfaPreviewData = [];
+  document.getElementById('tfaPreview').innerHTML = '';
+  document.getElementById('tfaImportStatus').textContent = '';
+  document.getElementById('tfaImportConfirm').disabled = true;
+  document.getElementById('tfaImportConfirm').textContent = 'Импортировать';
+  const f = document.getElementById('tfaFile'); if (f) f.value = '';
+}
+const _tfaDrop = document.getElementById('tfaDrop');
+const _tfaFile = document.getElementById('tfaFile');
+_tfaDrop.onclick = () => _tfaFile.click();
+_tfaFile.onchange = () => { if (_tfaFile.files[0]) tfaHandleFile(_tfaFile.files[0]); };
+['dragenter', 'dragover'].forEach(ev => _tfaDrop.addEventListener(ev, e => { e.preventDefault(); _tfaDrop.classList.add('drag'); }));
+['dragleave', 'drop'].forEach(ev => _tfaDrop.addEventListener(ev, e => { e.preventDefault(); _tfaDrop.classList.remove('drag'); }));
+_tfaDrop.addEventListener('drop', e => { const f = e.dataTransfer.files[0]; if (f) tfaHandleFile(f); });
+// paste a QR screenshot directly while the import tab is open
+document.addEventListener('paste', (e) => {
+  const m = document.getElementById('tfaModal');
+  if (!m.classList.contains('open')) return;
+  if (document.getElementById('tfaPaneImport').style.display === 'none') return;
+  const item = [...(e.clipboardData ? e.clipboardData.items : [])].find(i => i.type.startsWith('image/'));
+  if (item) { const f = item.getAsFile(); if (f) tfaHandleFile(f); }
+});
+
+async function tfaHandleFile(file) {
+  const status = document.getElementById('tfaImportStatus');
+  if (!file.type.startsWith('image/')) { status.textContent = 'Нужен файл изображения'; return; }
+  status.textContent = 'Распознаём QR…';
+  document.getElementById('tfaPreview').innerHTML = '';
+  document.getElementById('tfaImportConfirm').disabled = true;
+  const fd = new FormData();
+  fd.append('image', file);
+  try {
+    const data = await apiFetch('/2fa/import/qr', { method: 'POST', body: fd });
+    tfaPreviewData = data.accounts || [];
+    tfaRenderPreview();
+  } catch (e) {
+    status.textContent = 'QR не распознан — нужен экспорт-QR Google Authenticator целиком';
+  }
+}
+
+function tfaRenderPreview() {
+  const wrap = document.getElementById('tfaPreview');
+  const status = document.getElementById('tfaImportStatus');
+  if (!tfaPreviewData.length) { status.textContent = 'Аккаунты не найдены'; return; }
+  status.textContent = `Найдено: ${tfaPreviewData.length}. Отметьте, что импортировать:`;
+  wrap.innerHTML = tfaPreviewData.map((a, i) => `
+    <label class="tfa-preview-item">
+      <input type="checkbox" data-i="${i}" checked>
+      <div class="tfa-preview-info">
+        <div class="tfa-preview-name">${escapeHtml(a.issuer)}</div>
+        <div class="tfa-preview-acc">${escapeHtml(a.account || '—')} · <span class="mono">${escapeHtml(a.secret_preview || '')}</span></div>
+      </div>
+    </label>`).join('');
+  wrap.querySelectorAll('input[type=checkbox]').forEach(cb => cb.onchange = tfaSyncImportBtn);
+  tfaSyncImportBtn();
+}
+function tfaSyncImportBtn() {
+  const n = document.querySelectorAll('#tfaPreview input:checked').length;
+  const btn = document.getElementById('tfaImportConfirm');
+  btn.disabled = n === 0;
+  btn.textContent = n ? `Импортировать (${n})` : 'Импортировать';
+}
+document.getElementById('tfaImportConfirm').onclick = async () => {
+  const chosen = [...document.querySelectorAll('#tfaPreview input:checked')].map(cb => tfaPreviewData[+cb.dataset.i]).filter(Boolean);
+  if (!chosen.length) return;
+  const payload = { list_id: tfaCurrentList, accounts: chosen.map(a => ({ issuer: a.issuer, account: a.account, secret: a.secret, algorithm: a.algorithm, digits: a.digits })) };
+  try {
+    const data = await apiFetch('/2fa/import/confirm', { method: 'POST', headers: JH, body: JSON.stringify(payload) });
+    document.getElementById('tfaModal').classList.remove('open');
+    await load2faData();
+    todoToast(`Импортировано: ${(data.accounts || []).length}`);
+  } catch (e) {
+    document.getElementById('tfaImportStatus').textContent = 'Не удалось импортировать';
+  }
+};
+
+// ── списки (группы) ──
+let tfaListModalMode = 'add';
+function openTfaListModal(mode) {
+  if (!tfaOnline) return;
+  tfaListModalMode = mode;
+  const title = document.getElementById('tfaListModalTitle');
+  const input = document.getElementById('tfaListNameInput');
+  const delBtn = document.getElementById('tfaListDeleteBtn');
+  if (mode === 'edit') {
+    const l = tfaLists.find(x => x.id === tfaCurrentList);
+    title.textContent = 'Список';
+    input.value = l ? l.name : '';
+    delBtn.style.display = tfaLists.length > 1 ? '' : 'none';
+  } else {
+    title.textContent = 'Новый список';
+    input.value = '';
+    delBtn.style.display = 'none';
+  }
+  document.getElementById('tfaListModal').classList.add('open');
+  setTimeout(() => input.focus(), 30);
+}
+document.getElementById('tfaAddListBtn').onclick = () => openTfaListModal('add');
+document.getElementById('tfaEditListBtn').onclick = () => openTfaListModal('edit');
+document.getElementById('tfaListCancelBtn').onclick = () => document.getElementById('tfaListModal').classList.remove('open');
+document.getElementById('tfaListNameInput').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') document.getElementById('tfaListSaveBtn').click();
+});
+document.getElementById('tfaListSaveBtn').onclick = async () => {
+  const name = document.getElementById('tfaListNameInput').value.trim();
+  if (!name) return;
+  try {
+    if (tfaListModalMode === 'edit') {
+      const upd = await apiFetch('/2fa/lists/' + tfaCurrentList, { method: 'PATCH', headers: JH, body: JSON.stringify({ name }) });
+      const l = tfaLists.find(x => x.id === tfaCurrentList);
+      if (l) Object.assign(l, upd);
+    } else {
+      const l = await apiFetch('/2fa/lists', { method: 'POST', headers: JH, body: JSON.stringify({ name }) });
+      tfaLists.push(l);
+      tfaCurrentList = l.id;
+      tfaPersistCurrentList();
+    }
+  } catch (e) { tfaOnline = false; tfaUpdateStatus(); return; }
+  document.getElementById('tfaListModal').classList.remove('open');
+  renderTfaListSelect();
+  renderTfa(); tfaUpdateStatus();
+};
+document.getElementById('tfaListDeleteBtn').onclick = async () => {
+  if (tfaLists.length <= 1) return;
+  const l = tfaLists.find(x => x.id === tfaCurrentList);
+  const cnt = tfaAccounts.filter(a => a.list_id === tfaCurrentList).length;
+  const msg = cnt ? `Удалить список «${l ? l.name : ''}» и ${cnt} ключ(ей) внутри? Коды пропадут.`
+                  : `Удалить список «${l ? l.name : ''}»?`;
+  if (!await confirmDialog({ title: 'Удалить список', message: msg, okText: 'Удалить', danger: true })) return;
+  const id = tfaCurrentList;
+  try { await apiFetch('/2fa/lists/' + id, { method: 'DELETE' }); }
+  catch (e) { tfaOnline = false; tfaUpdateStatus(); return; }
+  tfaLists = tfaLists.filter(x => x.id !== id);
+  tfaAccounts = tfaAccounts.filter(a => a.list_id !== id);
+  tfaCurrentList = tfaLists[0] ? tfaLists[0].id : null;
+  tfaPersistCurrentList();
+  document.getElementById('tfaListModal').classList.remove('open');
+  renderTfaListSelect();
+  renderTfa(); tfaUpdateStatus();
+};
+
+// каждую секунду — обратный отсчёт по кольцам
+setInterval(tfaTick, 1000);
+
+// ══════════════════════════════════════════
 //  INIT
 // ══════════════════════════════════════════
 loadTodo();
@@ -6434,6 +7072,7 @@ loadEvents();
 renderCalendar();
 loadGarage();
 loadNotesData();
+load2faData();
 loadSettings();
 
 // restore active tab (after panels are ready)
