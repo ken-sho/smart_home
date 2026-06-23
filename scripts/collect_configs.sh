@@ -1,5 +1,5 @@
 #!/bin/bash
-# Собирает конфиги для Git
+# Собирает конфиги для Git + бэкап БД в Яндекс Диск
 
 source /opt/smart-home/.env
 REPO=/opt/smart-home-git
@@ -29,6 +29,9 @@ cp /data/homeassistant/configuration.yaml $REPO/config/ha_configuration.yaml
 cp /data/homeassistant/automations.yaml $REPO/config/ha_automations.yaml
 cp /data/homeassistant/scripts.yaml $REPO/config/ha_scripts.yaml
 
+# Systemd
+cp /etc/systemd/system/portal.service $REPO/config/portal.service
+
 # Grafana dashboards
 echo "Exporting Grafana dashboards..."
 mkdir -p $REPO/config/grafana_dashboards
@@ -41,19 +44,25 @@ curl -s http://admin:${GRAFANA_PASSWORD}@localhost:3000/api/search?type=dash-db 
     echo "  Exported: $title"
   done
 
-echo "Done!"
-
-# Portal backend
+# Portal
+echo "Collecting portal files..."
 mkdir -p $REPO/config/portal
+cp /data/portal/portal.html $REPO/config/portal/
+cp /data/portal/sw.js $REPO/config/portal/
 cp /data/portal/backend/main.py $REPO/config/portal/
+cp /data/portal/backend/requirements.txt $REPO/config/portal/
+cp /data/portal/backend/google_auth_migration.py $REPO/config/portal/
 cp /data/portal/backend/todo_schema.sql $REPO/config/portal/
 cp /data/portal/backend/notes_schema.sql $REPO/config/portal/
 cp /data/portal/backend/finance_schema.sql $REPO/config/portal/
 cp /data/portal/backend/garage_schema.sql $REPO/config/portal/
-cp /data/portal/backend/requirements.txt $REPO/config/portal/
+cp /data/portal/backend/events_schema.sql $REPO/config/portal/
+cp /data/portal/backend/cal_schema.sql $REPO/config/portal/
+cp /data/portal/backend/auth2fa_schema.sql $REPO/config/portal/
+cp /data/portal/backend/app_schema.sql $REPO/config/portal/
 
-# Systemd services
-cp /etc/systemd/system/portal.service $REPO/config/portal.service
+echo "Done!"
 
-# Portal frontend
-cp /data/portal/portal.html $REPO/config/portal/
+# Бэкап БД в Яндекс Диск
+echo "Starting DB backup..."
+bash /opt/smart-home-git/scripts/backup_db_cloud.sh
