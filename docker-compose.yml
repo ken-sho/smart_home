@@ -120,6 +120,7 @@ services:
       ADMIN_TOKEN: ${VW_ADMIN_TOKEN}
       SIGNUPS_ALLOWED: "false"
       WEBSOCKET_ENABLED: "true"
+      DOMAIN: https://core.tail751bc9.ts.net:8446
     volumes:
       - /data/vaultwarden:/data
     ports:
