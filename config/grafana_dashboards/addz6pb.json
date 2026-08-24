@@ -1008,6 +1008,78 @@
       ],
       "title": "Telegram",
       "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "ffnxnere9kw00e"
+      },
+      "description": "Дней до истечения TLS-сертификата nginx (core.tail751bc9.ts.net.crt)",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 7
+              },
+              {
+                "color": "green",
+                "value": 21
+              }
+            ]
+          },
+          "unit": "d"
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 2,
+        "x": 16,
+        "y": 0
+      },
+      "id": 13,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "percentChangeColorMode": "standard",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "pluginVersion": "13.0.1",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ffnxnere9kw00e"
+          },
+          "editorMode": "code",
+          "expr": "(cert_expiry_timestamp_seconds{domain=\"core.tail751bc9.ts.net\"} - time()) / 86400",
+          "legendFormat": "__auto",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "TLS Cert",
+      "type": "stat"
     }
   ],
   "preload": false,
@@ -1032,7 +1104,7 @@
     ]
   },
   "timezone": "browser",
-  "title": "System \u2014 Core",
+  "title": "System — Core",
   "uid": "addz6pb",
-  "version": 2
+  "version": 3
 }
