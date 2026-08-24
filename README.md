@@ -98,24 +98,44 @@ sudo -u postgres psql
 
 Nginx терминирует TLS и проксирует сервисы. Сертификат от Tailscale.
 
+**ВАЖНО (урок от 24.08.2026):** сертификат `tailscale cert` живёт не год, а
+около 1.5–3 месяцев (Let's Encrypt-подобный). 24.08.2026 он протух (истёк
+11.08.2026), потому что обновляли вручную "раз в год" — это и было причиной
+ошибки. Проверяйте реальный срок и обновляйте примерно раз в 1-2 месяца, в
+идеале — через cron/systemd-таймер (пока не настроено, см. «Известные
+проблемы» ниже):
+
 ```bash
-# Получить/обновить сертификат (раз в год)
-tailscale cert core.tail751bc9.ts.net
+# Проверить срок действия
+echo | openssl s_client -connect localhost:8443 -servername core.tail751bc9.ts.net 2>/dev/null | openssl x509 -noout -enddate
+
+# Получить/обновить сертификат
+cd /tmp && tailscale cert core.tail751bc9.ts.net
 cp core.tail751bc9.ts.net.* /opt/smart-home/config/nginx/
 docker compose restart nginx
 ```
+
+Этот файл использует **только** nginx (маршруты через порт 8443/8445, см.
+ниже) — публичный Funnel (443) и прямой доступ к Vaultwarden (8446)
+получают TLS от самого `tailscaled` автоматически и от протухания этого
+файла не зависят.
 
 ### Маршрутизация
 
 | URL | Сервис | Доступ |
 |-----|--------|--------|
 | `https://core.tail751bc9.ts.net/` | Home Assistant | Публично (Funnel) |
-| `https://core.tail751bc9.ts.net/vault/` | Vaultwarden | Публично (Funnel) |
 | `https://core.tail751bc9.ts.net/portal/` | Личный портал | Telegram Mini App + Tailscale |
 | `https://core.tail751bc9.ts.net/api/` | Portal API | Telegram Mini App + Tailscale |
+| `https://core.tail751bc9.ts.net:8446` | Vaultwarden (веб + расширение) | Tailscale (dedicated serve, см. ниже) |
+| `https://core.tail751bc9.ts.net:8445` | Личный портал (прямой, для Service Worker) | Только Tailscale |
 | `http://100.69.214.120:8888` | Homer | Только Tailscale |
 | `http://100.69.214.120:3000` | Grafana | Только Tailscale |
 | `http://100.69.214.120:9090` | Prometheus | Только Tailscale |
+
+nginx.conf всё ещё содержит старый `location /vault/` (проксирует на
+Vaultwarden с урезанием префикса) — он больше не используется для доступа
+(оставлен, но фактически мёртвый маршрут), см. раздел про Vaultwarden ниже.
 
 ### Tailscale Funnel
 
@@ -126,6 +146,54 @@ docker compose restart nginx
 ```bash
 tailscale funnel --bg 8444
 ```
+
+---
+
+## Vaultwarden — доступ в обход nginx-субпути
+
+**Урок от 24.08.2026:** Vaultwarden не поддерживает работу из-под sub-path
+(`/vault/`) на общем домене — его роуты (`/api/`, `/identity/`,
+`/notifications/`) всегда на корне независимо от `DOMAIN`. Попытка задать
+`DOMAIN=https://core.tail751bc9.ts.net/vault` ломает всё 404-ками. Рабочее
+решение — отдельный `tailscale serve` на свой порт, без общего домена/пути:
+
+```bash
+tailscale serve --bg --https=8446 http://127.0.0.1:8081
+```
+
+Персистентность подтверждена (переживает `tailscaled`/ребут сервера —
+конфиг serve хранится в состоянии tailscaled, дополнительный systemd-юнит
+не нужен).
+
+В `docker-compose.yml` у сервиса `vaultwarden` должно быть:
+```yaml
+DOMAIN: https://core.tail751bc9.ts.net:8446
+```
+(без пути — иначе снова 404). Без `DOMAIN` вообще веб-клиент зависает на
+skeleton-плейсхолдерах (`/api/config` отдаёт `environment.api=http://localhost/api`,
+и клиент пытается стучаться в localhost браузера пользователя).
+
+Общий принцип для будущих self-hosted сервисов со своим web-клиентом: не
+сажать под sub-path общего домена, если сервис явно не заявляет поддержку
+этого — выделять отдельный `tailscale serve --https=PORT` + root-level
+`DOMAIN`/`PUBLIC_URL`.
+
+**Версия:** обновлена 24.08.2026 с 1.36.0 до **1.37.2** (известный баг
+совместимости WASM SDK новых Bitwarden-клиентов со старыми Vaultwarden —
+падение `invalid type: JsValue(Object(...)), expected a string` в
+браузерном расширении). Апдейт:
+```bash
+cd /opt/smart-home
+sudo -u postgres pg_dump vaultwarden | gzip > /data/backups/vaultwarden_pre_upgrade_$(date +%Y%m%d_%H%M%S).sql.gz
+docker compose pull vaultwarden
+docker compose up -d vaultwarden
+docker logs vaultwarden --tail 50   # проверить миграцию БД без ошибок
+```
+Если после апдейта расширение всё равно не грузит хранилище (веб-клиент и
+мобильное приложение работают, а расширение виснет на пустых
+skeleton-плейсхолдерах) — вероятная причина не сервер, а битое локальное
+состояние WASM-крипто-ядра самого расширения: помогает **полное удаление и
+переустановка расширения** (не просто logout/login).
 
 ---
 
@@ -345,6 +413,7 @@ curl -s --max-time 5 https://api.telegram.org && echo OK
 curl -fsSL https://tailscale.com/install.sh | sh
 tailscale up --netfilter-mode=off
 tailscale funnel --bg 8444
+tailscale serve --bg --https=8446 http://127.0.0.1:8081   # Vaultwarden, см. раздел выше — переживает ребут сам
 
 cat > /etc/networkd-dispatcher/routable.d/50-tailscale-routes.sh << 'ROUTE'
 #!/bin/bash
@@ -416,6 +485,26 @@ PostgreSQL бэкапы — через Barman на NAS (планируется).
 
 ---
 
+## Известные проблемы / TODO
+
+- **Автообновление TLS-сертификата nginx не настроено** — сейчас вручную
+  (см. «Nginx — Reverse Proxy»). Обсуждали cron vs. кнопку в личном
+  портале (root-сервис, уже может шеллить команды) — решение отложено.
+- **Tuya-интеграция в Home Assistant периодически просит
+  ре-авторизацию** (`Authentication failed. Please re-authenticate`,
+  всплывает после каждого рестарта HA) — чинится вручную в UI
+  (Настройки → Интеграции → Tuya → Reauthenticate).
+- **AmneziaWG (`awg-quick@wg0`) сейчас не активен** на Core, при этом
+  `telegram_reachable=1` (Telegram доступен и без VPN) — `check_connectivity.sh`
+  не привязан к конкретному интерфейсу, просто проверяет доступность
+  дефолтным маршрутом. Если AWG должен быть постоянно поднят — проверить,
+  почему не поднялся после ребута.
+- Старый `location /vault/` в `nginx.conf` не используется (см.
+  «Vaultwarden — доступ в обход nginx-субпути») — можно вычистить, когда
+  дойдут руки.
+
+---
+
 ## Changelog
 
 | Версия | Дата | Изменения |
@@ -428,3 +517,4 @@ PostgreSQL бэкапы — через Barman на NAS (планируется).
 | v0.6 | 2026-05 | Переустановка AWG, мониторинг Tailscale + Telegram в Grafana |
 | v0.7 | 2026-06 | PostgreSQL 18, Vaultwarden, nginx reverse proxy, Homer, Grafana/HA → PostgreSQL |
 | v0.8 | 2026-06 | Личный портал (FastAPI + PostgreSQL + Telegram Mini App), авторизация |
+| v0.9 | 2026-08 | Vaultwarden: фикс DOMAIN/sub-path (dedicated `tailscale serve :8446`), апдейт 1.36.0→1.37.2; обновлён протухший TLS-сертификат nginx (каданс в README был неверный — не год, а ~1-2 мес); фикс бага рассинхрона проекта в Заметках портала (кросс-вкладочный localStorage) |
