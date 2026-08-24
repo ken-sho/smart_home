@@ -5415,10 +5415,16 @@ function goOffline() {
   renderNotes();
 }
 function restoreCurrentProject() {
+  // Эта вкладка уже выбрала проект (свежий bootstrap, ручное переключение) —
+  // не даём localStorage/hash от ДРУГОЙ вкладки молча его перезаписать при
+  // повторном вызове loadNotesData() (реконнект, поллинг и т.п.).
+  if (state.currentProject && state.projects.find(p => p.id === state.currentProject)) {
+    return;
+  }
   const savedNav = readNav();
   if (savedNav.project && state.projects.find(p => p.id === savedNav.project)) {
     state.currentProject = savedNav.project;
-  } else if (!state.currentProject || !state.projects.find(p => p.id === state.currentProject)) {
+  } else {
     state.currentProject = state.projects[0] ? state.projects[0].id : null;
   }
 }
