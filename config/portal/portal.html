@@ -3849,6 +3849,8 @@ function portalBusy() {
   if (document.getElementById('vehicleModal').classList.contains('open')) return true;
   if (document.getElementById('listModal').classList.contains('open')) return true;
   if (document.getElementById('todoTagsModal').classList.contains('open')) return true;
+  if (document.getElementById('quickModal').classList.contains('open')) return true;
+  if (typeof quickSaveInFlight !== 'undefined' && quickSaveInFlight > 0) return true;
   if (state.todoOpenList) return true;
   const ae = document.activeElement;
   if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable)) return true;
@@ -5977,6 +5979,10 @@ function openQuickModal() {
   document.getElementById('quickModal').classList.add('open');
   setTimeout(() => document.getElementById('newQuickName').focus(), 30);
 }
+// счётчик незавершённых PATCH правок Быстрого доступа — пока > 0, авторефреш
+// (portalBusy) не должен трогать заметки, иначе успевает затереть свежую
+// правку старым значением с сервера (fire-and-forget PATCH обгоняет reload).
+let quickSaveInFlight = 0;
 function renderQuickModalList() {
   const list = document.getElementById('quickModalList');
   list.innerHTML = '';
@@ -5993,7 +5999,10 @@ function renderQuickModalList() {
       const v = el.value;
       if (v === q[field]) return;
       q[field] = v;
-      apiFetch('/notes/quick/' + q.id, { method: 'PATCH', headers: JH, body: JSON.stringify({ [field]: v }) }).catch(() => goOffline());
+      quickSaveInFlight++;
+      apiFetch('/notes/quick/' + q.id, { method: 'PATCH', headers: JH, body: JSON.stringify({ [field]: v }) })
+        .catch(() => goOffline())
+        .finally(() => { quickSaveInFlight--; });
       renderQuickBar();
     };
     nameEl.onblur = () => saveField('name', nameEl);
