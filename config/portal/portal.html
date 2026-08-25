@@ -7088,7 +7088,10 @@ loadSettings();
     activatePanel(nav.panel, { silent: true });
     state.activePanel = nav.panel;
   }
-  persistNav();
+  // persistNav() здесь не нужен — мы только восстанавливаем уже сохранённое.
+  // Вызов был синхронным и срабатывал ДО того, как асинхронный loadNotesData()
+  // успевал восстановить state.currentProject, из-за чего сохранённый project
+  // затирался на null (localStorage + hash) при каждой загрузке страницы.
 })();
 </script>
 </body>
