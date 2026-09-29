@@ -35,6 +35,8 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+import crypto
+
 DATABASE_URL = os.getenv("DATABASE_URL")
 # Предпочитаем раздельные переменные (удобно для systemd Environment=,
 # где спецсимволы в пароле ломают разбор единой строки DSN).
@@ -66,6 +68,7 @@ SCHEMA_FILES = [
     BASE_DIR / "garage_schema.sql",
     BASE_DIR / "cal_schema.sql",
     BASE_DIR / "auth2fa_schema.sql",
+    BASE_DIR / "crypto_schema.sql",
 ]
 
 pool: asyncpg.Pool | None = None
@@ -106,6 +109,12 @@ async def lifespan(app: FastAPI):
     scheduler.add_job(
         notify_tick, "interval", minutes=1, id="evt_notify",
         coalesce=True, max_instances=1, misfire_grace_time=30,
+    )
+    # сбор цен крипты: раз в час в :05, первый прогон через 30 с после старта
+    scheduler.add_job(
+        crypto.crypto_tick, "cron", minute=5, args=[pool], id="crypto_prices",
+        coalesce=True, max_instances=1, misfire_grace_time=600,
+        next_run_time=datetime.now(ZoneInfo("UTC")) + timedelta(seconds=30),
     )
     scheduler.start()
     yield
