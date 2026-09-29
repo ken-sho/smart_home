@@ -22,12 +22,18 @@
     закрытие ≥ T1                  → фиксировать ⅓, стоп в безубыток
     иначе                          → держать
   Покупка (свободные USDT от min_usdt), по каждой монете:
-    S — ближайшая поддержка ниже цены, R1/R2 — сопротивления выше,
-    стоп = S − 0.5·ATR, цель = (R1 + 2·R2)/3 (выход третями),
+    S — ближайшая поддержка ниже цены, R1/R2 — сопротивления выше
+    (нет второго сопротивления → R2 = R1 + 2·ATR),
+    стоп = min(S − 0.5·ATR, вход − stop_min_atr·ATR) — не вплотную к входу,
+    цель = (R1 + 2·R2)/3 (выход третями),
     R:R = (цель − цена)/(цена − стоп); нужно ≥ rr_min, а если реальная
     доходность Earn монеты (ставка − инфляция) ниже USDT — ≥ rr_min_low_earn;
-    цена ≤ S + near_atr·ATR; RSI ≤ rsi_hot; цена > MA50 или RSI < rsi_buy.
+    цена ≤ S + near_atr·ATR; RSI ≤ rsi_hot;
+    тренд: цена > MA50, или RSI < rsi_buy, или R:R ≥ rr_strong.
     Сумма = min(риск risk_pct% капитала / дистанция до стопа, max_part свободных).
+  Пороги проверены бэктестом 25.11.2025–29.09.2026 по обеим монетам:
+  стоп ≥ 2·ATR от входа — главный вклад (без него стопы выбивает шум);
+  авто-уровни из локальных экстремумов ухудшали результат — не используем.
 """
 import json
 import asyncio
@@ -48,8 +54,10 @@ DEFAULT_PARAMS = {
     "rr_min_low_earn": 2.5,     # для монет, чей Earn (минус инфляция) хуже USDT
     "near_atr": 1,              # «у поддержки» = не выше S + near_atr·ATR
     "trail_atr": 2,
+    "stop_min_atr": 2,          # стоп не ближе stop_min_atr·ATR от входа
     "rsi_hot": 70,
     "rsi_buy": 40,
+    "rr_strong": 4,             # такой R:R у поддержки проходит и против тренда
     "fiat_fee_pct": 5,          # потери при выводе USDT → ₽ (обмен + комиссия), для оценки
 }
 
@@ -373,17 +381,20 @@ def buy_candidate(coin, ind, levels, prm, usdt_apr, capital, usdt) -> dict | Non
     sup = [l for l in levels if l < p]
     res = sorted(l for l in levels if l > p)
     S = max(sup) if sup else ind["lo30"]
-    R1 = res[0] if res else ind["hi30"]
-    R2 = res[1] if len(res) > 1 else R1
-    stop = S - 0.5 * atr
-    rr_at = lambda e: ((R1 + 2 * R2) / 3 - e) / (e - stop) if e > stop else None
+    R1 = res[0] if res else max(ind["hi30"], p + 2 * atr)
+    R2 = res[1] if len(res) > 1 else R1 + 2 * atr
+    stop_at = lambda e: min(S - 0.5 * atr, e - prm["stop_min_atr"] * atr)
+    rr_at = lambda e: ((R1 + 2 * R2) / 3 - e) / (e - stop_at(e)) if e > stop_at(e) else None
+    stop = stop_at(p)
     rr = rr_at(p)
     real = coin["earn_apr"] - coin["inflation"]
     rr_need = prm["rr_min_low_earn"] if real < usdt_apr else prm["rr_min"]
     zone_hi = S + prm["near_atr"] * atr
     near = p <= zone_hi
     hot = ind["rsi"] is not None and ind["rsi"] > prm["rsi_hot"]
-    trend = (ind["ma50"] is not None and p > ind["ma50"]) or (ind["rsi"] is not None and ind["rsi"] < prm["rsi_buy"])
+    trend = ((ind["ma50"] is not None and p > ind["ma50"])
+             or (ind["rsi"] is not None and ind["rsi"] < prm["rsi_buy"])
+             or bool(rr and rr >= prm["rr_strong"]))
     ok = bool(rr and rr >= rr_need and near and not hot and trend)
     risk_frac = (p - stop) / p if p > stop else None
     amount = min(capital * prm["risk_pct"] / 100 / risk_frac, usdt * prm["max_part"], usdt) if risk_frac else 0
@@ -394,8 +405,12 @@ def buy_candidate(coin, ind, levels, prm, usdt_apr, capital, usdt) -> dict | Non
         trend_s = "MA50 ещё нет"
     elif p > ind["ma50"]:
         trend_s = f"Цена выше MA50 {_px(ind['ma50'])}"
+    elif ind["rsi"] is not None and ind["rsi"] < prm["rsi_buy"]:
+        trend_s = f"Цена ниже MA50 {_px(ind['ma50'])}, но RSI < {prm['rsi_buy']:g}"
+    elif trend:
+        trend_s = f"Цена ниже MA50 {_px(ind['ma50'])}, но R:R ≥ {prm['rr_strong']:g} — сильный вход у поддержки"
     else:
-        trend_s = f"Цена ниже MA50 {_px(ind['ma50'])}" + (f", но RSI < {prm['rsi_buy']:g} (перепроданность)" if trend else "")
+        trend_s = f"Цена ниже MA50 {_px(ind['ma50'])}, RSI ≥ {prm['rsi_buy']:g}, R:R < {prm['rr_strong']:g}"
     reasons = [
         f"{mark(rr and rr >= rr_need)} R:R {rr:.1f} (нужно ≥ {rr_need:g}): стоп {_px(stop)}, цели {_px(R1)} / {_px(R2)}" if rr
         else f"✗ Цена ниже расчётного стопа {_px(stop)}",
