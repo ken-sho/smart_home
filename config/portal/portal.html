@@ -1114,6 +1114,19 @@ input[type=number]:focus { border-color: var(--accent); }
 .crypto-plan-line { margin-top: 8px; font-size: 10.5px; color: var(--text3); font-family: var(--mono); line-height: 1.5; }
 .crypto-plan-line b { color: var(--text2); font-weight: 600; }
 .crypto-sig-sym { font-size: 10px; font-family: var(--mono); padding: 1px 6px; border-radius: 999px; background: var(--surface3); color: var(--text2); flex-shrink: 0; }
+/* приватность «глаза» Финансов: прячем суммы и количества, цены и индикаторы — нет */
+#cryptoMeta, .crypto-total-val, .crypto-total-sub b, .crypto-stats .crypto-stat-val,
+.crypto-row-amt, .crypto-adv li, #cryptoBody .svc-name { transition: filter .14s ease; }
+#panel-finance.amounts-hidden #cryptoMeta,
+#panel-finance.amounts-hidden .crypto-total-val,
+#panel-finance.amounts-hidden .crypto-total-sub b,
+#panel-finance.amounts-hidden .crypto-stats .crypto-stat-val,
+#panel-finance.amounts-hidden .crypto-row-amt,
+#panel-finance.amounts-hidden .crypto-adv li,
+#panel-finance.amounts-hidden #cryptoBody .svc-row .svc-name {
+  filter: blur(7px);
+  user-select: none; -webkit-user-select: none;
+}
 @keyframes crypto-spin { to { transform: rotate(360deg); } }
 #cryptoRefreshBtn.spinning i { animation: crypto-spin .8s linear infinite; }
 #cryptoRefreshBtn.spinning { color: var(--accent); border-color: var(--accent); }
@@ -2073,9 +2086,7 @@ input[type=number]:focus { border-color: var(--accent); }
   <button class="nav-btn" data-panel="finance" title="Финансы"><i class="ti ti-wallet"></i></button>
   <button class="nav-btn" data-panel="birthdays" title="События"><i class="ti ti-bell"></i></button>
   <button class="nav-btn" data-panel="calendar" title="Календарь"><i class="ti ti-calendar"></i></button>
-  <button class="nav-btn" data-panel="garage" title="Гараж"><i class="ti ti-car"></i></button>
-  <button class="nav-btn" data-panel="crypto" title="Крипто"><i class="ti ti-currency-bitcoin"></i></button>
-  <button class="nav-btn" data-panel="notes" title="Заметки"><i class="ti ti-notes"></i></button>
+  <button class="nav-btn" data-panel="garage" title="Гараж"><i class="ti ti-car"></i></button>  <button class="nav-btn" data-panel="notes" title="Заметки"><i class="ti ti-notes"></i></button>
   <button class="nav-btn" data-panel="auth2fa" title="2FA коды"><i class="ti ti-shield-lock"></i></button>
   <div class="nav-spacer"></div>
   <button class="nav-btn" id="settingsBtn" data-panel="settings" title="Настройки"><i class="ti ti-settings"></i></button>
@@ -2133,14 +2144,18 @@ input[type=number]:focus { border-color: var(--accent); }
       <i class="ti ti-wallet" style="color:var(--accent)"></i>
       <span class="panel-title">Финансы</span>
       <span class="panel-meta" id="fin-month-rem"></span>
+      <span class="panel-meta" id="cryptoMeta" style="display:none"></span>
       <button class="icon-btn fin-eye" id="finEyeBtn" title="Показать суммы"><i class="ti ti-eye-off"></i></button>
+      <button class="icon-btn" id="cryptoRefreshBtn" title="Обновить цены" style="display:none"><i class="ti ti-refresh"></i></button>
       <span class="conn-dot offline" id="finance-conn" title=""></span>
+      <span class="conn-dot offline" id="crypto-conn" title="" style="display:none"></span>
     </div>
     <div class="fin-modes" id="finModes">
       <button class="fin-mode active" data-mode="credits">Кредиты</button>
       <button class="fin-mode" data-mode="dk">Д/К</button>
+      <button class="fin-mode" data-mode="crypto">Крипто</button>
     </div>
-    <div class="fin-period">
+    <div class="fin-period" id="finPeriod">
       <select id="finYear" class="fin-select" title="Год"></select>
       <select id="finMonth" class="fin-select" style="flex:1" title="Месяц"></select>
       <button class="btn-primary fin-add" id="addCreditBtn" title="Добавить кредит"><i class="ti ti-plus"></i></button>
@@ -2165,6 +2180,8 @@ input[type=number]:focus { border-color: var(--accent); }
       </div>
     </div>
     <div class="panel-body" id="creditList"></div>
+    <!-- режим «Крипто»: портфель GRAM/TRX + касса USDT (модуль CRYPTO ниже) -->
+    <div class="panel-body" id="cryptoBody" style="display:none"></div>
     <div class="fin-summary" id="finSummary">
       <div class="fin-stat">
         <div class="fin-stat-val" id="fin-total" style="color:var(--text)">0 ₽</div>
@@ -2357,18 +2374,6 @@ input[type=number]:focus { border-color: var(--accent); }
       </div>
     </div>
     <div class="panel-body" id="garageBody"></div>
-  </div>
-
-  <!-- ── CRYPTO ── -->
-  <div class="panel" id="panel-crypto" data-screen-label="Крипто">
-    <div class="panel-header">
-      <i class="ti ti-currency-bitcoin" style="color:var(--accent)"></i>
-      <span class="panel-title">Крипто</span>
-      <span class="panel-meta" id="cryptoMeta"></span>
-      <span class="conn-dot offline" id="crypto-conn" title=""></span>
-      <button class="icon-btn" id="cryptoRefreshBtn" title="Обновить"><i class="ti ti-refresh"></i></button>
-    </div>
-    <div class="panel-body" id="cryptoBody"></div>
   </div>
 
   <!-- ── NOTES ── -->
@@ -3439,7 +3444,11 @@ let financeCurrentMonth = null;     // 'YYYY-MM' — максимально до
 let financeMonths = [];             // месяцы, где есть данные (кредиты)
 let financeOverdue = 0;             // всего просрочек (для бейджа)
 let financeEditId = null;           // id редактируемой строки (null = добавление)
-let financeMode = 'credits';        // 'credits' | 'dk'
+// 'credits' | 'dk' | 'crypto' — последний выбранный режим переживает перезагрузку
+let financeMode = (() => {
+  try { const m = localStorage.getItem('portal_fin_mode'); return ['credits', 'dk', 'crypto'].includes(m) ? m : 'credits'; }
+  catch (e) { return 'credits'; }
+})();
 let finEntryKind = 'out';           // тип события в форме Д/К
 let financeRevealed = false;        // приватность: false = суммы скрыты (блюр)
 
@@ -3578,11 +3587,30 @@ async function loadDK(month, quiet) {
   renderFinance();
 }
 
-// ── переключение режима Кредиты / Д/К ──
+// ── переключение режима Кредиты / Д/К / Крипто ──
+// «Крипто» живёт в своём блоке (#cryptoBody): месяц/год и нижняя сводка
+// ему не нужны, зато нужны своя кнопка обновления и свой индикатор БД.
+function applyFinModeLayout() {
+  const crypto = financeMode === 'crypto';
+  document.querySelectorAll('#finModes .fin-mode').forEach(b => b.classList.toggle('active', b.dataset.mode === financeMode));
+  const show = (id, on) => { const el = document.getElementById(id); if (el) el.style.display = on ? '' : 'none'; };
+  show('finPeriod', !crypto);
+  show('creditList', !crypto);
+  show('finSummary', !crypto);
+  show('fin-month-rem', !crypto);
+  show('finance-conn', !crypto);
+  show('cryptoBody', crypto);
+  show('cryptoMeta', crypto);
+  show('cryptoRefreshBtn', crypto);
+  show('crypto-conn', crypto);
+}
+
 function setFinMode(mode) {
   financeMode = mode;
-  document.querySelectorAll('#finModes .fin-mode').forEach(b => b.classList.toggle('active', b.dataset.mode === mode));
+  try { localStorage.setItem('portal_fin_mode', mode); } catch (e) {}
+  applyFinModeLayout();
   closeCreditForm();
+  if (mode === 'crypto') { if (typeof loadCrypto === 'function') loadCrypto(); return; }
   if (!financeOnline) { renderFinance(); return; }
   if (mode === 'dk') loadDK(state.currentMonth);
   else loadFinMonth(state.currentMonth);
@@ -3628,6 +3656,7 @@ function finPeriodChange() {
 
 // ── рендер (диспетчер) ──
 function renderFinance() {
+  if (financeMode === 'crypto') return;   // крипта рисуется сама (renderCrypto → #cryptoBody)
   const addBtn = document.getElementById('addCreditBtn');
   if (!financeOnline) {
     document.getElementById('creditList').innerHTML = `<div class="db-error-banner">
@@ -7650,9 +7679,13 @@ loadNotesData();
 load2faData();
 loadSettings();
 
+applyFinModeLayout();
+
 // restore active tab (after panels are ready)
 (function () {
   const nav = readNav();
+  // бывшая отдельная вкладка «Крипто» теперь режим внутри «Финансов»
+  if (nav.panel === 'crypto') { nav.panel = 'finance'; setFinMode('crypto'); }
   if (nav.panel && document.querySelector('.nav-btn[data-panel="' + nav.panel + '"]')) {
     activatePanel(nav.panel, { silent: true });
     state.activePanel = nav.panel;
