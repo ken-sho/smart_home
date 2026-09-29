@@ -353,7 +353,8 @@ async def auth_check(request: Request):
 @app.post("/api/bot/webhook")
 async def bot_webhook(request: Request):
     """Принимает апдейты от Telegram. Публичный (см. middleware), но защищён
-       секретом setWebhook. Отвечает на /portal и /start кнопкой Mini App."""
+       секретом setWebhook. Отвечает на /portal и /start кнопкой Mini App,
+       на /wallet — кнопкой-ссылкой на Telegram Wallet."""
     expected = await get_setting("telegram_webhook_secret")
     if expected:
         got = request.headers.get("X-Telegram-Bot-Api-Secret-Token")
@@ -383,6 +384,17 @@ async def bot_webhook(request: Request):
                         "text": "Открыть портал",
                         "web_app": {"url": f"{base}/portal/"},
                     }]],
+                })
+            except Exception as e:
+                print("[webhook] sendMessage:", e)
+    elif cmd == "/wallet":
+        # Telegram Wallet (сейчас «Walt») — боты не видят друг друга, поэтому
+        # только кнопка-переход; t.me/wallet/start открывает сам кошелёк, а не чат
+        token = await get_setting("telegram_bot_token")
+        if token:
+            try:
+                await send_message(token, chat_id, "Кошелёк 👇", reply_markup={
+                    "inline_keyboard": [[{"text": "💼 Открыть Wallet", "url": "https://t.me/wallet/start"}]],
                 })
             except Exception as e:
                 print("[webhook] sendMessage:", e)
