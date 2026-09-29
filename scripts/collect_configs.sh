@@ -60,6 +60,11 @@ cp /data/portal/backend/events_schema.sql $REPO/config/portal/
 cp /data/portal/backend/cal_schema.sql $REPO/config/portal/
 cp /data/portal/backend/auth2fa_schema.sql $REPO/config/portal/
 cp /data/portal/backend/app_schema.sql $REPO/config/portal/
+cp /data/portal/backend/crypto.py $REPO/config/portal/
+cp /data/portal/backend/crypto_schema.sql $REPO/config/portal/
+cp /data/portal/backend/budget.py $REPO/config/portal/
+cp /data/portal/backend/budget_schema.sql $REPO/config/portal/
+# /data/portal/statements/ (банковские справки: ФИО, счёт) — намеренно НЕ копируем
 
 echo "Done!"
 
