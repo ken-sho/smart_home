@@ -50,7 +50,37 @@ DEFAULT_PARAMS = {
     "trail_atr": 2,
     "rsi_hot": 70,
     "rsi_buy": 40,
+    "fiat_fee_pct": 5,          # потери при выводе USDT → ₽ (обмен + комиссия), для оценки
 }
+
+CG_RUB = ("https://api.coingecko.com/api/v3/coins/tether/market_chart"
+          "?vs_currency=rub&days=1")
+CBR_DAILY = "https://www.cbr-xml-daily.ru/daily_json.js"
+RATE_TTL_SEC = 600
+_rub_cache: dict = {}
+
+
+def _get_json(url: str) -> dict:
+    req = urllib.request.Request(url, headers={"User-Agent": "portal-crypto"})
+    with urllib.request.urlopen(req, timeout=20) as resp:
+        return json.loads(resp.read().decode("utf-8"))
+
+
+async def rub_rate() -> dict:
+    """Курс USDT/RUB: рыночный (CoinGecko), запасной — USD ЦБ. Кэш 10 минут."""
+    now = datetime.now(timezone.utc)
+    if _rub_cache and (now - _rub_cache["at"]).total_seconds() < RATE_TTL_SEC:
+        return _rub_cache["data"]
+    try:
+        d = await asyncio.to_thread(_get_json, CG_RUB)
+        t, p = d["prices"][-1]
+        data = {"rate": float(p), "source": "рынок USDT/RUB (CoinGecko)",
+                "ts": datetime.fromtimestamp(int(t) / 1000, tz=timezone.utc).isoformat()}
+    except Exception:
+        d = await asyncio.to_thread(_get_json, CBR_DAILY)
+        data = {"rate": float(d["Valute"]["USD"]["Value"]), "source": "курс USD ЦБ", "ts": d["Date"]}
+    _rub_cache.update(at=now, data=data)
+    return data
 BACKFILL_MIN_POINTS = 100   # меньше точек — считаем, что истории нет
 CG_PAUSE_SEC = 3            # пауза между запросами (лимиты бесплатного API)
 

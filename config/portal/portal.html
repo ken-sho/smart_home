@@ -5545,6 +5545,11 @@ function cryptoRowEl(r) {
     const names = { deposit: 'Пополнение USDT', salary: 'Зарплата', fiat_out: 'Вывод в фиат', reconcile: 'Сверка USDT' };
     title = names[r.kind] || r.kind;
     amt = fmtUsdSigned(r.amount); cls = upDown(r.amount);
+    if (r.rub) {
+      const eff = r.rub / Math.abs(r.amount);
+      sub.push(`${Math.round(r.rub).toLocaleString('ru-RU')} ₽ · ${eff.toFixed(2)} ₽/$` + (r.rate ? ` (${((eff / r.rate - 1) * 100).toFixed(1)}% к рынку)` : ''));
+    }
+    if (r.fin_entry_id) sub.push('→ Д/К');
   }
   const note = r.type === 'trade' ? r.reason : r.note;
   if (note) sub.push(escapeHtml(note));
@@ -5561,6 +5566,7 @@ function cryptoRowEl(r) {
 async function deleteCryptoRow(r, title) {
   const msg = r.type === 'trade' && (r.side === 'buy' || r.side === 'sell') && !r.external
     ? `Удалить «${title}»?\nДвижение USDT по этой сделке тоже удалится.`
+    : r.fin_entry_id ? `Удалить «${title}»?\nПриход в Д/К тоже удалится.`
     : `Удалить «${title}»?`;
   if (!await confirmDialog({ title: 'Удалить запись', message: msg, okText: 'Удалить', danger: true })) return;
   try { await cryptoSend((r.type === 'trade' ? '/crypto/trades/' : '/crypto/cash/') + r.id, 'DELETE'); }
@@ -5608,20 +5614,33 @@ function openCryptoForm(kind, symbol, suggest) {
     body.innerHTML = `
       <label>Пришло USDT</label><input type="text" id="cfAmount" inputmode="decimal" placeholder="$">
       <label>Из них вывел в фиат</label><input type="text" id="cfFiat" inputmode="decimal" placeholder="$ (можно 0)">
+      <label>Получено ₽ за вывод (факт — поправьте)</label><input type="text" id="cfRub" inputmode="decimal" placeholder="₽" data-auto="1">
       ${dateField}
+      <label class="cf-check"><input type="checkbox" id="cfToDk" checked> Записать приход ₽ в Д/К</label>
+      <div class="cf-hint" id="cfRate">Курс загружается…</div>
       <div class="cf-hint" id="cfHint"></div>`;
     const upd = () => {
       const a = parseNum(document.getElementById('cfAmount').value) || 0;
       const f = parseNum(document.getElementById('cfFiat').value) || 0;
+      cryptoRubAutofill(f);
       document.getElementById('cfHint').textContent = a ? `В торговлю останется ${fmtUsd(a - f)}\nСвободно станет ${fmtUsd(state.crypto.usdt + a - f)}` : '';
     };
     ['cfAmount', 'cfFiat'].forEach(id => document.getElementById(id).addEventListener('input', upd));
+    cryptoRubField(() => upd());
   } else if (kind === 'fiat') {
     title.textContent = 'Вывод в фиат';
     body.innerHTML = `
       <label>Сумма USDT</label><input type="text" id="cfAmount" inputmode="decimal" placeholder="$">
+      <label>Получено ₽ (факт — поправьте)</label><input type="text" id="cfRub" inputmode="decimal" placeholder="₽" data-auto="1">
       ${dateField}
+      <label class="cf-check"><input type="checkbox" id="cfToDk" checked> Записать приход ₽ в Д/К</label>
+      <label class="cf-check"><input type="checkbox" id="cfDkOnly"> USDT уже списаны раньше — только запись в Д/К</label>
+      <div class="cf-hint" id="cfRate">Курс загружается…</div>
       <div class="cf-hint">Свободно ${fmtUsd(state.crypto.usdt)}</div>`;
+    const amt = document.getElementById('cfAmount');
+    amt.addEventListener('input', () => cryptoRubAutofill(parseNum(amt.value) || 0));
+    document.getElementById('cfDkOnly').onchange = (e) => { if (e.target.checked) document.getElementById('cfToDk').checked = true; };
+    cryptoRubField(() => cryptoRubAutofill(parseNum(amt.value) || 0));
   } else if (kind === 'reconcile') {
     title.textContent = 'Сверка с Wallet';
     body.innerHTML = ['GRAM', 'TRX', 'USDT'].map(s => {
@@ -5639,7 +5658,10 @@ function openCryptoForm(kind, symbol, suggest) {
     title.textContent = 'Настройки ' + symbol;
     body.innerHTML = `
       <label>Ставка Earn, % годовых</label><input type="text" id="cfApr" inputmode="decimal" value="${c.earn_apr}">
-      ${symbol === 'USDT' ? '' : `
+      ${symbol === 'USDT' ? `
+      <label>Потери при выводе в ₽ (обмен + комиссия), %</label>
+      <input type="text" id="cfFiatFee" inputmode="decimal" value="${state.crypto.params ? state.crypto.params.fiat_fee_pct : 5}">
+      <div class="cf-hint">Для оценки в форме вывода: рыночный курс USDT/RUB минус этот %. В Д/К уходит сумма, которую вы впишете как факт.</div>` : `
       <label>Ядро, шт (не трогаем сигналами продажи)</label><input type="text" id="cfCore" inputmode="decimal" value="${c.core_qty}">
       <label>Комиссия + спред на сделку, %</label><input type="text" id="cfFee" inputmode="decimal" value="${c.fee_pct}">
       <div class="section-label">План торговой части${sug ? ' — предложен по совету' : ''}</div>
@@ -5657,6 +5679,38 @@ function openCryptoForm(kind, symbol, suggest) {
   document.getElementById('cryptoSaveBtn').disabled = false;
   document.getElementById('cryptoModal').classList.add('open');
   const first = body.querySelector('input[type=text]'); if (first) first.focus();
+}
+
+// ── вывод в фиат: курс и автоподстановка «Получено ₽» ──
+let cryptoQuote = null;   // { rate, net_rate, fee_pct, source, ts } — последний курс для формы
+function cryptoRubField(onReady) {
+  const rub = document.getElementById('cfRub');
+  rub.addEventListener('input', () => { rub.dataset.auto = rub.value.trim() ? '0' : '1'; cryptoRateHint(); });
+  cryptoQuote = null;
+  apiFetch('/crypto/fiat-quote').then(q => {
+    cryptoQuote = q;
+    if (document.getElementById('cfRub') === rub) { cryptoRateHint(); onReady(); }
+  }).catch(() => {
+    const h = document.getElementById('cfRate');
+    if (h) h.textContent = 'Курс недоступен — впишите полученные ₽ вручную';
+  });
+}
+function cryptoRubAutofill(usd) {
+  const rub = document.getElementById('cfRub');
+  if (!rub || rub.dataset.auto !== '1' || !cryptoQuote) return;
+  rub.value = usd > 0 ? Math.round(usd * cryptoQuote.net_rate) : '';
+  cryptoRateHint();
+}
+function cryptoRateHint() {
+  const h = document.getElementById('cfRate');
+  if (!h || !cryptoQuote) return;
+  const q = cryptoQuote;
+  let s = `Рынок ${q.rate.toFixed(2)} ₽/$ − ${q.fee_pct}% = ${q.net_rate.toFixed(2)} ₽/$\n(${q.source})`;
+  const rubEl = document.getElementById('cfRub');
+  const usd = parseNum((document.getElementById('cfFiat') || document.getElementById('cfAmount')).value);
+  const rub = parseNum(rubEl.value);
+  if (rubEl.dataset.auto === '0' && usd && rub) s += `\nФакт ${(rub / usd).toFixed(2)} ₽/$ — ${((rub / usd / q.rate - 1) * 100).toFixed(1)}% к рынку`;
+  h.textContent = s;
 }
 
 function cryptoTradeHint(kind) {
@@ -5693,12 +5747,18 @@ async function saveCryptoForm() {
     const a = parseNum(val('cfAmount')), f = parseNum(val('cfFiat')) || 0;
     if (!a || a <= 0) { err.textContent = 'Укажите, сколько пришло'; return; }
     if (f < 0 || f > a) { err.textContent = 'Вывод в фиат — от 0 до суммы зарплаты'; return; }
+    const toDk = document.getElementById('cfToDk').checked, rub = parseNum(val('cfRub'));
+    if (f > 0 && toDk && !(rub > 0)) { err.textContent = 'Укажите, сколько пришло ₽ (или снимите галочку Д/К)'; return; }
     reqs.push(['/crypto/cash', 'POST', { kind: 'salary', amount: a, date: val('cfDate') || null }]);
-    if (f > 0) reqs.push(['/crypto/cash', 'POST', { kind: 'fiat_out', amount: f, date: val('cfDate') || null, note: 'из зарплаты' }]);
+    if (f > 0) reqs.push(['/crypto/cash', 'POST', { kind: 'fiat_out', amount: f, date: val('cfDate') || null, note: 'из зарплаты',
+      rub: rub || null, rate: cryptoQuote ? cryptoQuote.rate : null, to_dk: toDk }]);
   } else if (kind === 'fiat') {
-    const a = parseNum(val('cfAmount'));
+    const a = parseNum(val('cfAmount')), rub = parseNum(val('cfRub'));
+    const toDk = document.getElementById('cfToDk').checked, dkOnly = document.getElementById('cfDkOnly').checked;
     if (!a || a <= 0) { err.textContent = 'Укажите сумму'; return; }
-    reqs.push(['/crypto/cash', 'POST', { kind: 'fiat_out', amount: a, date: val('cfDate') || null }]);
+    if ((toDk || dkOnly) && !(rub > 0)) { err.textContent = 'Укажите, сколько пришло ₽ (или снимите галочку Д/К)'; return; }
+    reqs.push(['/crypto/cash', 'POST', { kind: 'fiat_out', amount: a, date: val('cfDate') || null,
+      rub: rub || null, rate: cryptoQuote ? cryptoQuote.rate : null, to_dk: toDk, dk_only: dkOnly }]);
   } else if (kind === 'reconcile') {
     for (const s of ['GRAM', 'TRX', 'USDT']) {
       const inp = document.getElementById('cfRec' + s);
@@ -5711,7 +5771,11 @@ async function saveCryptoForm() {
     if (symbol !== 'USDT') { body.core_qty = parseNum(val('cfCore')); body.fee_pct = parseNum(val('cfFee')); }
     if (Object.values(body).some(v => v == null || v < 0)) { err.textContent = 'Нужны числа ≥ 0'; return; }
     reqs.push(['/crypto/assets/' + symbol, 'PATCH', body]);
-    if (symbol !== 'USDT') {
+    if (symbol === 'USDT') {
+      const fee = parseNum(val('cfFiatFee'));
+      if (fee == null || fee < 0 || fee >= 100) { err.textContent = 'Потери при выводе: число от 0 до 100'; return; }
+      if (!state.crypto.params || fee !== state.crypto.params.fiat_fee_pct) reqs.push(['/crypto/params/fiat_fee_pct', 'PUT', { value: fee }]);
+    } else {
       const c = cryptoCoin(symbol);
       const plan = { t1: parseNum(val('cfT1')), t2: parseNum(val('cfT2')), stop: parseNum(val('cfStop')), restart: document.getElementById('cfRestart').checked };
       const old = c.plan || {};
@@ -5737,6 +5801,11 @@ async function saveCryptoForm() {
   }
   closeCryptoModal();
   await loadCrypto();
+  const dkReq = reqs.find(([, , b]) => b && b.kind === 'fiat_out' && (b.to_dk || b.dk_only) && b.rub);
+  if (dkReq) {
+    todoToast(`Приход ${Math.round(dkReq[2].rub).toLocaleString('ru-RU')} ₽ записан в Д/К`);
+    if (financeOnline) loadFinance();   // обновим кэш Д/К (режим «Крипто» он не перерисует)
+  }
   // купили монету без плана — сразу предлагаем план (из совета, если он есть)
   if (kind === 'buy') {
     const sym = reqs[0][2].symbol, c = cryptoCoin(sym);

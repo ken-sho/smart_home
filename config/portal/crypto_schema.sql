@@ -101,6 +101,13 @@ CREATE TABLE IF NOT EXISTS crypto.cash (
 
 CREATE INDEX IF NOT EXISTS idx_cash_date ON crypto.cash (date, created_at);
 
+-- вывод в фиат → приход в Д/К (finance.entries): сколько пришло рублей,
+-- рыночный курс USDT/RUB на момент вывода, ссылка на строку Д/К
+ALTER TABLE crypto.cash ADD COLUMN IF NOT EXISTS rub          numeric(14,2);
+ALTER TABLE crypto.cash ADD COLUMN IF NOT EXISTS rate         numeric(12,4);
+ALTER TABLE crypto.cash ADD COLUMN IF NOT EXISTS fin_entry_id uuid
+    REFERENCES finance.entries(id) ON DELETE SET NULL;
+
 -- ── План по монете ────────────────────────────────────────────
 --   created_at — старт плана: продажи после него считаются третями
 CREATE TABLE IF NOT EXISTS crypto.plans (

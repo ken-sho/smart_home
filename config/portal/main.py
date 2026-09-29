@@ -1615,6 +1615,15 @@ class CryptoCashIn(BaseModel):
     amount: float              # всегда > 0, знак — по kind
     date: Date | None = None
     note: str = ""
+    # только для fiat_out: приход в Д/К
+    rub: float | None = None   # сколько пришло ₽ (факт или оценка из формы)
+    rate: float | None = None  # рыночный курс USDT/RUB на момент вывода
+    to_dk: bool = True         # записать приход в Д/К
+    dk_only: bool = False      # USDT уже списаны раньше — только строка в Д/К
+
+
+class CryptoParamIn(BaseModel):
+    value: float
 
 
 class CryptoReconcileIn(BaseModel):
@@ -1651,8 +1660,25 @@ def to_crypto_cash(r) -> dict:
         "trade_id": str(r["trade_id"]) if r["trade_id"] else None,
         "date": r["date"].isoformat(),
         "note": r["note"],
+        "rub": float(r["rub"]) if r["rub"] is not None else None,
+        "rate": float(r["rate"]) if r["rate"] is not None else None,
+        "fin_entry_id": str(r["fin_entry_id"]) if r["fin_entry_id"] else None,
         "created_at": r["created_at"].isoformat(),
     }
+
+
+async def _dk_income(c, day: Date, usd: float, rub: float, rate: float | None) -> uuid.UUID:
+    """Приход в Д/К за месяц вывода: «USDT → ₽»."""
+    month = day.strftime("%Y-%m")
+    pos = await c.fetchval(
+        "SELECT COALESCE(max(position)+1, 0) FROM finance.entries WHERE month = $1", month
+    )
+    name = f"USDT → ₽ (${usd:g}" + (f" · {rub / usd:.2f} ₽/$" if usd else "") + ")"
+    return await c.fetchval(
+        "INSERT INTO finance.entries (month, kind, name, amount, due_day, position) "
+        "VALUES ($1, 'in', $2, $3, $4, $5) RETURNING id",
+        month, name, round(rub, 2), day.day, pos,
+    )
 
 
 async def _crypto_coin(c, symbol: str) -> dict:
@@ -1797,29 +1823,69 @@ async def create_crypto_cash(x: CryptoCashIn):
     if x.amount <= 0:
         raise HTTPException(400, "Сумма должна быть > 0")
     amount = round(-x.amount if x.kind == "fiat_out" else x.amount, 2)
+    fiat = x.kind == "fiat_out"
+    if fiat and (x.to_dk or x.dk_only) and (x.rub is None or x.rub <= 0):
+        raise HTTPException(400, "Укажите, сколько пришло ₽")
+    day = x.date or Date.today()
     async with pool.acquire() as c:
         async with c.transaction():
+            entry_id = await _dk_income(c, day, x.amount, x.rub, x.rate) if fiat and (x.to_dk or x.dk_only) else None
+            if fiat and x.dk_only:
+                return {"dk_only": True, "fin_entry_id": str(entry_id)}
             if amount < 0:
                 usdt = float(await c.fetchval("SELECT COALESCE(sum(amount), 0) FROM crypto.cash"))
                 if -amount > usdt + 0.005:
                     raise HTTPException(409, f"Недостаточно USDT (свободно {usdt:.2f})")
             r = await c.fetchrow(
-                "INSERT INTO crypto.cash (kind, amount, date, note) "
-                "VALUES ($1, $2, COALESCE($3, current_date), $4) RETURNING *",
-                x.kind, amount, x.date, x.note.strip(),
+                "INSERT INTO crypto.cash (kind, amount, date, note, rub, rate, fin_entry_id) "
+                "VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *",
+                x.kind, amount, day, x.note.strip(),
+                round(x.rub, 2) if fiat and x.rub else None, x.rate if fiat else None, entry_id,
             )
     return to_crypto_cash(r)
+
+
+@app.get("/api/crypto/fiat-quote")
+async def crypto_fiat_quote():
+    """Курс для формы вывода: рыночный USDT/RUB и заданные потери на обмен/вывод."""
+    try:
+        q = await crypto.rub_rate()
+    except Exception as e:
+        raise HTTPException(502, f"Курс недоступен: {e}")
+    async with pool.acquire() as c:
+        prm = await crypto.load_params(c)
+    fee = prm["fiat_fee_pct"]
+    return {**q, "fee_pct": fee, "net_rate": q["rate"] * (1 - fee / 100)}
+
+
+@app.put("/api/crypto/params/{key}")
+async def put_crypto_param(key: str, p: CryptoParamIn):
+    if key not in crypto.DEFAULT_PARAMS:
+        raise HTTPException(404, "Неизвестный параметр")
+    if p.value < 0:
+        raise HTTPException(400, "Значение не может быть отрицательным")
+    async with pool.acquire() as c:
+        await c.execute(
+            "INSERT INTO crypto.params (key, value) VALUES ($1, $2) "
+            "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
+            key, p.value,
+        )
+    return {"key": key, "value": p.value}
 
 
 @app.delete("/api/crypto/cash/{cash_id}", status_code=204)
 async def delete_crypto_cash(cash_id: uuid.UUID):
     async with pool.acquire() as c:
-        trade_id = await c.fetchval("SELECT trade_id FROM crypto.cash WHERE id = $1", cash_id)
-        if trade_id:
-            raise HTTPException(409, "Это часть сделки — удалите саму сделку")
-        res = await c.execute("DELETE FROM crypto.cash WHERE id = $1", cash_id)
-    if res.endswith(" 0"):
-        raise HTTPException(404, "Запись не найдена")
+        async with c.transaction():
+            row = await c.fetchrow("SELECT trade_id, fin_entry_id FROM crypto.cash WHERE id = $1", cash_id)
+            if not row:
+                raise HTTPException(404, "Запись не найдена")
+            if row["trade_id"]:
+                raise HTTPException(409, "Это часть сделки — удалите саму сделку")
+            await c.execute("DELETE FROM crypto.cash WHERE id = $1", cash_id)
+            # вывод в фиат: связанный приход в Д/К удаляем вместе с ним
+            if row["fin_entry_id"]:
+                await c.execute("DELETE FROM finance.entries WHERE id = $1", row["fin_entry_id"])
 
 
 @app.post("/api/crypto/reconcile")
