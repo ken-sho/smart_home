@@ -233,7 +233,18 @@ def indicators(points, price) -> dict | None:
     vol = (sum((r - mean) ** 2 for r in rets) / len(rets)) ** 0.5 * 365 ** 0.5 * 100
     sundays = [c for c in closed if c["day"].weekday() == 6]
     chg = lambda k: (price / C[-k] - 1) * 100 if len(C) >= k else None
+    # MA200 — ориентир долгосрочного тренда (в правилах не участвует);
+    # пересечение — последнее закрытие по другую сторону от MA200, чем предыдущее
+    ma200, ma200_prev = _sma(C, 200), _sma(C[:-1], 200)
+    cross = None
+    if ma200 and ma200_prev:
+        if C[-2] < ma200_prev and C[-1] > ma200:
+            cross = "up"
+        elif C[-2] > ma200_prev and C[-1] < ma200:
+            cross = "down"
     return {
+        "ma200": ma200,
+        "ma200_cross": cross,
         "close": C[-1],                       # последнее дневное закрытие
         "close_day": closed[-1]["day"].isoformat(),
         "prev_close": C[-2],
@@ -342,6 +353,10 @@ def sell_advice(coin, ind, plan, levels, prm, sold_since, max_close_since) -> di
         reasons.append(f"Цена выше T1 внутри дня — ждём закрытия")
     if status != "exit" and stop and price < stop <= cl:
         reasons.append(f"Цена ниже стопа внутри дня — ждём закрытия")
+    if ind["ma200_cross"]:
+        reasons.append(f"Закрытием пересекли MA200 {_px(ind['ma200'])} "
+                       + ("вверх — долгосрочный тренд разворачивается вверх" if ind["ma200_cross"] == "up"
+                          else "вниз — долгосрочный тренд ослаб"))
     for lv in levels:
         if (ind["prev_close"] - lv) * (cl - lv) < 0:
             reasons.append(f"Закрытием пробит уровень {_px(lv)} — проверьте сетку алертов")
@@ -418,7 +433,7 @@ async def snapshot(c) -> dict:
     """Портфель + индикаторы + план/уровни + советы по каждой монете и по USDT."""
     snap = await portfolio(c)
     prm = await load_params(c)
-    since = datetime.now(timezone.utc) - timedelta(days=150)
+    since = datetime.now(timezone.utc) - timedelta(days=230)   # MA200 + запас
     pts = await c.fetch(
         "SELECT symbol, ts, price FROM crypto.prices WHERE ts > $1 ORDER BY symbol, ts", since
     )

@@ -5491,16 +5491,20 @@ function cryptoIndHtml(c) {
   const planStr = p && (p.t1 || p.t2 || p.stop)
     ? `План: T1 <b>${px(p.t1)}</b> · T2 <b>${px(p.t2)}</b> · стоп <b>${px(p.stop)}</b>`
     : 'План не задан';
+  const maCell = (label, v) => cell(label, v == null ? '—' : px(v), v == null ? '' : (c.price > v ? 'c-up' : 'c-down'));
+  const cross = i.ma200_cross === 'up' ? '⚡ Закрытием пересекли MA200 вверх<br>'
+    : i.ma200_cross === 'down' ? '⚡ Закрытием пересекли MA200 вниз<br>' : '';
   return `<div class="crypto-ind">
       ${cell('RSI14', i.rsi == null ? '—' : i.rsi.toFixed(0), rsiCls)}
-      ${cell('MA20', px(i.ma20), c.price > i.ma20 ? 'c-up' : 'c-down')}
-      ${cell('MA50', i.ma50 == null ? '—' : px(i.ma50), i.ma50 == null ? '' : (c.price > i.ma50 ? 'c-up' : 'c-down'))}
       ${cell('7д', fmtPct(i.chg7) || '—', upDown(i.chg7))}
       ${cell('30д', fmtPct(i.chg30) || '—', upDown(i.chg30))}
+      ${maCell('MA20', i.ma20)}
+      ${maCell('MA50', i.ma50)}
+      ${maCell('MA200', i.ma200)}
       ${cell('ATR (ход/день)', (i.atr / c.price * 100).toFixed(1) + '%')}
     </div>
     <div class="crypto-plan-line">
-      Закрытие ${fmtDateRu(i.close_day)}: <b>${px(i.close)}</b> · поддержка <b>${px(sup)}</b> · сопротивление <b>${px(res)}</b><br>
+      ${cross}Закрытие ${fmtDateRu(i.close_day)}: <b>${px(i.close)}</b> · поддержка <b>${px(sup)}</b> · сопротивление <b>${px(res)}</b><br>
       ${planStr}
     </div>`;
 }
