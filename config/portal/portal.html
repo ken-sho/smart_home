@@ -661,6 +661,25 @@ input[type=number]:focus { border-color: var(--accent); }
 .bud-op-c { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text2); }
 .bud-op .credit-amount { font-size: 11.5px; min-width: 70px; }
 .bud-note { font-size: 10.5px; color: var(--text3); padding: 6px 2px 12px; }
+.bud-op { cursor: pointer; border-radius: var(--radius-sm); }
+.bud-op:hover { background: var(--surface2); }
+.bud-op-t { color: var(--text3); font-family: var(--mono); font-size: 10px; }
+.bud-op-note { font-size: 10.5px; color: var(--text3); font-style: italic; padding: 0 0 3px 44px; }
+.bud-sort-btn { width: 100%; margin-bottom: 8px; display: flex; align-items: center; justify-content: center; gap: 6px; }
+#budgetOpModal .modal, #budgetSortModal .modal { width: 310px; max-height: 90vh; overflow-y: auto; }
+.bud-desc { font-size: 10.5px; color: var(--text3); line-height: 1.45; word-break: break-word; }
+.bud-split-row { display: flex; gap: 5px; }
+/* перебиваем .crypto-form select/input { width:100% } — иначе строка части разъезжается */
+.crypto-form .bud-split-row select { width: auto; flex: 1; min-width: 0; }
+.crypto-form .bud-split-row input[type=text] { width: 86px; flex: none; }
+#budgetOpModal .modal, #budgetSortModal .modal, #cryptoModal .modal {
+  scrollbar-width: thin; scrollbar-color: var(--border2) transparent;
+}
+.bud-sort-row { padding: 7px 0; border-bottom: 1px solid var(--border); }
+.bud-sort-row:last-child { border-bottom: none; }
+.bud-sort-top { display: flex; gap: 8px; font-size: 12px; margin-bottom: 5px; }
+.bud-sort-top b { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.bud-sort-row select { width: 100%; }
 
 /* Д/К — переключатель типа в форме */
 .fin-kind-row { display: flex; gap: 6px; }
@@ -2596,6 +2615,31 @@ input[type=number]:focus { border-color: var(--accent); }
   </div>
 </div>
 
+<!-- Траты: операция (категория, запомнить для контрагента, заметка, разбиение) -->
+<div class="modal-overlay" id="budgetOpModal">
+  <div class="modal">
+    <div class="modal-title" id="budOpTitle"></div>
+    <div class="crypto-form" id="budOpBody"></div>
+    <div class="cf-err" id="budOpErr"></div>
+    <div class="modal-actions">
+      <button class="btn-ghost" id="budOpCancel">Отмена</button>
+      <button class="btn-primary" id="budOpSave">Сохранить</button>
+    </div>
+  </div>
+</div>
+
+<!-- Траты: очередь «Разобрать» — контрагенты без своего правила -->
+<div class="modal-overlay" id="budgetSortModal">
+  <div class="modal">
+    <div class="modal-title">Разобрать</div>
+    <div class="cf-hint">Выберите категорию — правило запомнится, и все операции (прошлые и будущие) этого магазина или получателя пойдут туда.</div>
+    <div id="budSortList"></div>
+    <div class="modal-actions">
+      <button class="btn-primary" id="budSortClose">Готово</button>
+    </div>
+  </div>
+</div>
+
 <!-- Crypto: форма операции (покупка / продажа / зарплата / вывод / сверка / настройки монеты) -->
 <div class="modal-overlay" id="cryptoModal">
   <div class="modal">
@@ -3642,6 +3686,7 @@ async function loadDK(month, quiet) {
     state.currentMonth = month;
     state.finance.entries = data.entries;
     state.finance.creditsPaid = data.credits_paid;
+    state.finance.bankExpense = data.bank_expense || 0;
   } catch (e) { financeOnline = false; }
   if (quiet) return;             // вызвано из loadFinance — рендер будет снаружи
   closeCreditForm();
@@ -3746,11 +3791,13 @@ function renderFinance() {
 
 // ── режим «Траты»: операции из справки Ozon Банка по категориям ──
 state.budget = null;           // { month, income, expense, excluded, categories, ops }
+state.budgetUnsorted = [];     // очередь «Разобрать»
 let budgetOpenCat = null;      // раскрытая категория (id)
 async function loadBudget(month, quiet) {
   if (!financeOnline || month > financeCurrentMonth) return;
   try {
-    state.budget = await apiFetch('/budget/month/' + month);
+    const [b, u] = await Promise.all([apiFetch('/budget/month/' + month), apiFetch('/budget/unsorted').catch(() => [])]);
+    state.budget = b; state.budgetUnsorted = u || [];
     state.currentMonth = month;
   } catch (e) { state.budget = null; }
   if (quiet) return;
@@ -3761,13 +3808,31 @@ async function loadBudget(month, quiet) {
 }
 
 function fmtRub(n) { return (n < 0 ? '−' : '') + Math.round(Math.abs(n)).toLocaleString('ru-RU') + ' ₽'; }
+function budCat(id) { return (state.budget && state.budget.categories || []).find(c => c.id === id); }
+const OZON_ORDER_URL = 'https://www.ozon.ru/my/orderdetails/?order=';
+
+// строки категории: разбитая операция попадает в каждую категорию своей частью
+function budCatItems(cid) {
+  const out = [];
+  state.budget.ops.forEach(o => {
+    if (o.excluded) return;
+    if (o.splits && o.splits.length) {
+      const sign = o.amount > 0 ? 1 : -1;
+      o.splits.filter(s => s.category_id === cid).forEach(s => out.push({ op: o, amount: sign * s.amount, part: true }));
+    } else if (o.category_id === cid) out.push({ op: o, amount: o.amount, part: false });
+  });
+  return out;
+}
 
 function renderBudget() {
   const el = document.getElementById('creditList');
   const b = state.budget;
   if (!b) { el.innerHTML = '<div class="empty">Не удалось загрузить траты.</div>'; return; }
+  const nSort = state.budgetUnsorted.length;
+  const sortBtn = nSort ? `<button class="btn-ghost bud-sort-btn" id="budSortBtn"><i class="ti ti-list-check"></i> Разобрать · ${nSort}</button>` : '';
   if (!b.ops.length) {
-    el.innerHTML = `<div class="empty">Операций за месяц нет.<br>Загрузите справку Ozon Банка — кнопка <i class="ti ti-file-upload"></i> справа от месяца.<br><span style="color:var(--text3)">Повторная загрузка дублей не создаёт.</span></div>`;
+    el.innerHTML = sortBtn + `<div class="empty">Операций за месяц нет.<br>Загрузите справку Ozon Банка — кнопка <i class="ti ti-file-upload"></i> справа от месяца.<br><span style="color:var(--text3)">Повторная загрузка дублей не создаёт.</span></div>`;
+    const sb = document.getElementById('budSortBtn'); if (sb) sb.onclick = openBudgetSort;
     return;
   }
   const exp = b.categories.filter(c => c.kind === 'expense' && c.total < 0).sort((x, y) => x.total - y.total);
@@ -3775,6 +3840,7 @@ function renderBudget() {
   const maxExp = exp.length ? -exp[0].total : 1;
   const rest = b.income - b.expense;
   el.innerHTML = `
+    ${sortBtn}
     <div class="bud-sum">
       <div><div class="fin-stat-val green credit-amount">${fmtRub(b.income)}</div><div class="fin-stat-label">доход</div></div>
       <div><div class="fin-stat-val red credit-amount">${fmtRub(b.expense)}</div><div class="fin-stat-label">траты</div></div>
@@ -3783,30 +3849,196 @@ function renderBudget() {
     <div class="svc-section-label">Траты по категориям</div>
     <div id="budExp"></div>
     ${inc.length ? '<div class="svc-section-label">Доходы</div><div id="budInc"></div>' : ''}
-    <div class="bud-note">Переводы между своими счетами и погашение кредитов в траты не входят.</div>`;
+    <div class="bud-note">Переводы между своими счетами и погашение кредитов в траты не входят. Нажмите на операцию — сменить категорию, добавить заметку или разбить.</div>`;
+  const sb = document.getElementById('budSortBtn'); if (sb) sb.onclick = openBudgetSort;
   const put = (box, c, max) => {
     const row = document.createElement('div');
-    row.className = 'bud-cat' + (budgetOpenCat === c.id ? ' open' : '');
-    const ops = b.ops.filter(o => o.category_id === c.id);
+    const open = budgetOpenCat === c.id;
+    row.className = 'bud-cat' + (open ? ' open' : '');
+    const items = budCatItems(c.id);
     row.innerHTML = `
       <div class="bud-cat-top">
         <span class="bud-cat-name">${escapeHtml(c.name)}</span>
-        <span class="bud-cat-n">${ops.length}</span>
+        <span class="bud-cat-n">${items.length}</span>
         <span class="credit-amount">${fmtRub(Math.abs(c.total))}</span>
       </div>
       ${max ? `<div class="bud-bar"><div style="width:${Math.max(2, Math.abs(c.total) / max * 100)}%"></div></div>` : ''}
-      ${budgetOpenCat === c.id ? `<div class="bud-ops">${ops.map(o => `
-        <div class="bud-op">
-          <span class="bud-op-d">${o.op_at.slice(8, 10)}.${o.op_at.slice(5, 7)}</span>
-          <span class="bud-op-c">${escapeHtml(o.counterparty)}${o.order_no ? ` <span style="color:var(--text3)">№${escapeHtml(o.order_no.split('-').pop())}</span>` : ''}</span>
-          <span class="credit-amount ${o.amount > 0 ? 'c-up' : ''}">${fmtRub(o.amount)}</span>
-        </div>`).join('')}</div>` : ''}`;
-    row.querySelector('.bud-cat-top').onclick = () => { budgetOpenCat = budgetOpenCat === c.id ? null : c.id; renderBudget(); };
+      ${open ? '<div class="bud-ops"></div>' : ''}`;
+    row.querySelector('.bud-cat-top').onclick = () => { budgetOpenCat = open ? null : c.id; renderBudget(); };
+    if (open) {
+      const list = row.querySelector('.bud-ops');
+      items.forEach(({ op: o, amount, part }) => {
+        const r = document.createElement('div');
+        const dt = o.op_at;
+        r.innerHTML = `
+          <div class="bud-op">
+            <span class="bud-op-d">${dt.slice(8, 10)}.${dt.slice(5, 7)} <span class="bud-op-t">${dt.slice(11, 16)}</span></span>
+            <span class="bud-op-c">${part ? '<i class="ti ti-arrows-split" title="Часть операции"></i> ' : ''}${escapeHtml(o.counterparty)}${o.order_no ? ` <span style="color:var(--text3)">№${escapeHtml(o.order_no.split('-').pop())}</span>` : ''}</span>
+            <span class="credit-amount ${amount > 0 ? 'c-up' : ''}">${fmtRub(amount)}</span>
+          </div>
+          ${o.note ? `<div class="bud-op-note">${escapeHtml(o.note)}</div>` : ''}`;
+        r.onclick = () => openBudgetOp(o);
+        list.appendChild(r);
+      });
+    }
     box.appendChild(row);
   };
   exp.forEach(c => put(document.getElementById('budExp'), c, maxExp));
   inc.forEach(c => put(document.getElementById('budInc'), c, 0));
 }
+
+// ── окно операции ──
+let budOp = null;
+const BUD_KIND = { card: 'Оплата картой', ozon: 'Покупка на Ozon', ozon_refund: 'Возврат Ozon', sbp_person: 'Перевод человеку',
+                   sbp_org: 'Перевод организации', payment: 'Платёж', salary: 'Зарплата', self: 'Между своими счетами',
+                   credit: 'Погашение кредита', other: 'Операция' };
+function budCatOptions(kind, selected) {
+  return (state.budget.categories || []).filter(c => c.kind === kind)
+    .map(c => `<option value="${c.id}"${c.id === selected ? ' selected' : ''}>${escapeHtml(c.name)}</option>`).join('')
+    + '<option value="__new">＋ Новая категория…</option>';
+}
+function budOpCatKind(o) { return o.amount > 0 && o.kind !== 'ozon_refund' ? 'income' : 'expense'; }
+
+function openBudgetOp(o) {
+  budOp = o;
+  const body = document.getElementById('budOpBody');
+  const dt = o.op_at;
+  document.getElementById('budOpTitle').textContent = o.counterparty || 'Операция';
+  const ck = budOpCatKind(o);
+  body.innerHTML = `
+    <div class="cf-hint">${dt.slice(8, 10)}.${dt.slice(5, 7)}.${dt.slice(0, 4)} ${dt.slice(11, 16)} · ${BUD_KIND[o.kind] || ''} · <b class="${o.amount > 0 ? 'c-up' : ''}">${fmtRub(o.amount)}</b></div>
+    <div class="bud-desc">${escapeHtml(o.description)}</div>
+    ${o.order_no ? `<button class="btn-ghost" id="budOzonLink" style="align-self:flex-start"><i class="ti ti-external-link"></i> Заказ Ozon №${escapeHtml(o.order_no)}</button>` : ''}
+    ${o.excluded ? '<div class="cf-hint">Перевод между своими счетами / погашение кредита — в траты не входит.</div>' : `
+    <label>Категория</label>
+    <select id="budOpCat">${budCatOptions(ck, o.category_id)}</select>
+    <label class="cf-check"><input type="checkbox" id="budOpRemember"> Все операции «${escapeHtml(o.counterparty)}» — в эту категорию</label>`}
+    <label>Заметка</label>
+    <input type="text" id="budOpNote" value="${escapeHtml(o.note || '')}" placeholder="напр. день рождения">
+    ${o.excluded ? '' : `
+    <label class="cf-check"><input type="checkbox" id="budOpSplitOn"${o.splits.length ? ' checked' : ''}> Разбить на части</label>
+    <div id="budOpSplit" style="display:${o.splits.length ? 'flex' : 'none'};flex-direction:column;gap:5px"></div>`}`;
+  const link = document.getElementById('budOzonLink');
+  if (link) link.onclick = () => openInNewTab(OZON_ORDER_URL + encodeURIComponent(o.order_no));
+  const sel = document.getElementById('budOpCat');
+  if (sel) sel.onchange = () => budNewCatIfNeeded(sel, ck);
+  if (!o.excluded) {
+    const on = document.getElementById('budOpSplitOn');
+    const box = document.getElementById('budOpSplit');
+    const parts = o.splits.length ? o.splits.map(s => ({ ...s })) : [
+      { category_id: o.category_id, amount: Math.abs(o.amount) }, { category_id: null, amount: 0 }];
+    budRenderSplit(box, parts, ck);
+    on.onchange = () => { box.style.display = on.checked ? 'flex' : 'none'; };
+  }
+  document.getElementById('budOpErr').textContent = '';
+  document.getElementById('budgetOpModal').classList.add('open');
+}
+
+async function budNewCatIfNeeded(sel, kind) {
+  if (sel.value !== '__new') return;
+  const name = await promptDialog({ title: 'Новая категория', placeholder: kind === 'income' ? 'напр. Подработка' : 'напр. Семья', okText: 'Создать' });
+  if (!name || !name.trim()) { sel.selectedIndex = 0; return; }
+  try {
+    const c = await cryptoSend('/budget/categories', 'POST', { name: name.trim(), kind });
+    state.budget.categories.push({ ...c, total: 0 });
+    document.querySelectorAll('#budgetOpModal select, #budgetSortModal select').forEach(s => {
+      const cur = s === sel ? c.id : +s.value;
+      const k = s.dataset.kind || kind;
+      if (k === kind) { s.innerHTML = budCatOptions(kind, cur); }
+    });
+  } catch (e) { todoToast(e.message); sel.selectedIndex = 0; }
+}
+
+function budRenderSplit(box, parts, kind) {
+  const total = Math.abs(budOp.amount);
+  const draw = () => {
+    const sum = parts.reduce((s, p) => s + (+p.amount || 0), 0);
+    box.innerHTML = parts.map((p, i) => `
+      <div class="bud-split-row" data-i="${i}">
+        <select data-kind="${kind}">${'<option value="">— категория —</option>' + budCatOptions(kind, p.category_id)}</select>
+        <input type="text" inputmode="decimal" value="${p.amount || ''}" placeholder="сумма">
+        <button class="vlr-del" title="Убрать" style="width:26px;background:none;border:1px solid var(--border2);color:var(--text3);border-radius:var(--radius-sm)">×</button>
+      </div>`).join('') + `
+      <div style="display:flex;gap:8px;align-items:center">
+        <button class="btn-ghost" id="budSplitAdd"><i class="ti ti-plus"></i> часть</button>
+        <span class="cf-hint" style="flex:1;text-align:right">${Math.abs(sum - total) < 0.005 ? '✓ сходится' : `осталось ${(total - sum).toFixed(2)}`}</span>
+      </div>`;
+    box.querySelectorAll('.bud-split-row').forEach(r => {
+      const i = +r.dataset.i;
+      const s = r.querySelector('select'), inp = r.querySelector('input');
+      s.onchange = async () => { await budNewCatIfNeeded(s, kind); parts[i].category_id = s.value && s.value !== '__new' ? +s.value : null; };
+      inp.onchange = () => { parts[i].amount = parseNum(inp.value) || 0; draw(); };
+      r.querySelector('button').onclick = () => { parts.splice(i, 1); draw(); };
+    });
+    box.querySelector('#budSplitAdd').onclick = () => {
+      const left = Math.max(0, +(total - parts.reduce((s, p) => s + (+p.amount || 0), 0)).toFixed(2));
+      parts.push({ category_id: null, amount: left }); draw();
+    };
+  };
+  box._parts = parts;
+  draw();
+}
+
+function closeBudgetOp() { document.getElementById('budgetOpModal').classList.remove('open'); budOp = null; }
+
+async function saveBudgetOp() {
+  if (!budOp) return;
+  const o = budOp, err = document.getElementById('budOpErr');
+  err.textContent = '';
+  const body = { note: document.getElementById('budOpNote').value };
+  const sel = document.getElementById('budOpCat');
+  const splitOn = document.getElementById('budOpSplitOn');
+  try {
+    if (sel && sel.value && sel.value !== '__new' && !(splitOn && splitOn.checked)) {
+      const cid = +sel.value, rem = document.getElementById('budOpRemember').checked;
+      if (cid !== o.category_id || rem) { body.category_id = cid; body.remember = rem; }
+    }
+    await cryptoSend('/budget/ops/' + o.id, 'PATCH', body);
+    if (splitOn) {
+      const parts = splitOn.checked ? document.getElementById('budOpSplit')._parts : [];
+      if (splitOn.checked && parts.some(p => !p.category_id)) throw new Error('У каждой части выберите категорию');
+      if (splitOn.checked || o.splits.length) await cryptoSend('/budget/ops/' + o.id + '/splits', 'PUT', { parts: parts.filter(p => p.amount > 0) });
+    }
+  } catch (e) { err.textContent = e.message; return; }
+  closeBudgetOp();
+  await loadBudget(state.currentMonth);
+}
+document.getElementById('budOpCancel').onclick = closeBudgetOp;
+document.getElementById('budOpSave').onclick = saveBudgetOp;
+
+// ── очередь «Разобрать» ──
+function openBudgetSort() {
+  const list = document.getElementById('budSortList');
+  const rows = state.budgetUnsorted;
+  list.innerHTML = rows.length ? '' : '<div class="empty">Всё разобрано.</div>';
+  rows.forEach(u => {
+    const kind = u.total > 0 ? 'income' : 'expense';
+    const r = document.createElement('div');
+    r.className = 'bud-sort-row';
+    r.innerHTML = `
+      <div class="bud-sort-top"><b title="${escapeHtml(u.counterparty)}">${escapeHtml(u.counterparty)}</b>
+        <span style="color:var(--text3)">${u.n}×</span><span class="${u.total > 0 ? 'c-up' : ''}">${fmtRub(u.total)}</span></div>
+      <select data-kind="${kind}">${budCatOptions(kind, u.category_id)}</select>`;
+    const s = r.querySelector('select');
+    s.onchange = async () => {
+      await budNewCatIfNeeded(s, kind);
+      if (!s.value || s.value === '__new') return;
+      try {
+        const res = await cryptoSend('/budget/rules', 'POST', { pattern: u.counterparty, category_id: +s.value });
+        const c = budCat(+s.value);
+        todoToast(`«${u.counterparty}» → ${c ? c.name : 'категория'} (${res.changed} опер.)`);
+        state.budgetUnsorted = state.budgetUnsorted.filter(x => x !== u);
+        r.remove();
+      } catch (e) { todoToast(e.message); }
+    };
+    list.appendChild(r);
+  });
+  document.getElementById('budgetSortModal').classList.add('open');
+}
+document.getElementById('budSortClose').onclick = async () => {
+  document.getElementById('budgetSortModal').classList.remove('open');
+  await loadBudget(state.currentMonth);
+};
 
 async function budgetUpload(file) {
   const btn = document.getElementById('budgetImportBtn');
@@ -3876,7 +4108,8 @@ function renderDK() {
   const el = document.getElementById('creditList');
   const entries = [...state.finance.entries].sort(byDay);
   const cp = state.finance.creditsPaid || 0;
-  if (!entries.length && !cp) { el.innerHTML = '<div class="empty">Нет приходов и расходов</div>'; updateFinSummary(); return; }
+  const be = state.finance.bankExpense || 0;
+  if (!entries.length && !cp && !be) { el.innerHTML = '<div class="empty">Нет приходов и расходов</div>'; updateFinSummary(); return; }
   el.innerHTML = '';
   entries.forEach(en => {
     const row = document.createElement('div');
@@ -3918,6 +4151,20 @@ function renderDK() {
     row.append(sign, main, day, amount);
     el.appendChild(row);
   }
+  // строка-итог по тратам из справок банка (read-only) → режим «Траты»
+  if (be > 0) {
+    const row = document.createElement('div');
+    row.className = 'credit-row dk-credits';
+    row.title = 'Открыть «Траты»';
+    row.onclick = () => setFinMode('budget');
+    const sign = document.createElement('div'); sign.className = 'dk-sign out'; sign.textContent = '−';
+    const main = document.createElement('div'); main.className = 'credit-main';
+    main.innerHTML = `<div class="credit-name">Траты по карте (Ozon Банк)</div>`;
+    const day = document.createElement('div'); day.className = 'credit-day empty'; day.textContent = '–';
+    const amount = document.createElement('div'); amount.className = 'credit-amount'; amount.textContent = fmtMoney(be);
+    row.append(sign, main, day, amount);
+    el.appendChild(row);
+  }
   updateFinSummary();
 }
 
@@ -3930,7 +4177,7 @@ function updateFinSummary() {
   if (financeMode === 'dk') {
     let inc = 0, exp = 0;
     state.finance.entries.forEach(e => { if (e.kind === 'in') inc += e.amount; else exp += e.amount; });
-    exp += state.finance.creditsPaid || 0;
+    exp += (state.finance.creditsPaid || 0) + (state.finance.bankExpense || 0);
     const bal = inc - exp;
     l1.textContent = 'приход'; l2.textContent = 'расход';
     t.textContent = fmtMoney(inc); t.style.color = GREEN;
@@ -4139,6 +4386,8 @@ function portalBusy() {
   if (document.getElementById('quickModal').classList.contains('open')) return true;
   if (document.getElementById('cryptoModal').classList.contains('open')) return true;
   if (document.getElementById('cryptoChartModal').classList.contains('open')) return true;
+  if (document.getElementById('budgetOpModal').classList.contains('open')) return true;
+  if (document.getElementById('budgetSortModal').classList.contains('open')) return true;
   if (typeof quickSaveInFlight !== 'undefined' && quickSaveInFlight > 0) return true;
   if (state.todoOpenList) return true;
   const ae = document.activeElement;

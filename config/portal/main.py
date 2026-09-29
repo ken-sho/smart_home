@@ -100,6 +100,7 @@ async def lifespan(app: FastAPI):
             if sql.exists():
                 await c.execute(sql.read_text(encoding="utf-8"))
         await budget.ensure_seed(c)   # категории и правила трат по умолчанию
+        await budget.recategorize(c)  # правила могли поменяться в коде — пересчёт (ручные не трогает)
     # регистрируем вебхук бота, если задан токен (не валим старт при ошибке)
     try:
         if await get_setting("telegram_bot_token"):
@@ -1371,10 +1372,13 @@ async def finance_dk(month: str):
             "WHERE month = $1 AND paid",
             month,
         )
+        # траты по карте из справок банка (Финансы → Траты), без своих переводов и кредитов
+        bank_expense = (await budget.month_summary(c, month))["expense"]
     return {
         "month": month,
         "entries": [to_entry(r) for r in entries],
         "credits_paid": float(credits_paid),
+        "bank_expense": bank_expense,
     }
 
 
@@ -1644,6 +1648,114 @@ async def budget_month(month: str):
         raise HTTPException(400, "Месяц в формате YYYY-MM")
     async with pool.acquire() as c:
         return await budget.month_summary(c, month)
+
+
+class BudgetOpPatch(BaseModel):
+    category_id: int | None = None
+    note: str | None = None
+    remember: bool = False       # запомнить: все операции этого контрагента → category_id
+
+
+class BudgetSplitsIn(BaseModel):
+    parts: list[dict]            # [{category_id, amount}] — сумма частей = |сумма операции|; [] — снять разбиение
+
+
+class BudgetRuleIn(BaseModel):
+    pattern: str
+    category_id: int
+
+
+class BudgetCategoryIn(BaseModel):
+    name: str
+    kind: str = "expense"
+
+
+async def _budget_cat_exists(c, cid: int):
+    if not await c.fetchval("SELECT 1 FROM budget.categories WHERE id = $1", cid):
+        raise HTTPException(404, "Категория не найдена")
+
+
+@app.patch("/api/budget/ops/{op_id}")
+async def budget_op_patch(op_id: uuid.UUID, p: BudgetOpPatch):
+    async with pool.acquire() as c:
+        op = await c.fetchrow("SELECT id, kind, counterparty FROM budget.ops WHERE id = $1", op_id)
+        if not op:
+            raise HTTPException(404, "Операция не найдена")
+        if p.note is not None:
+            await c.execute("UPDATE budget.ops SET note = $2 WHERE id = $1", op_id, p.note.strip()[:500])
+        changed = 0
+        if p.category_id is not None:
+            if op["kind"] in budget.EXCLUDED_KINDS:
+                raise HTTPException(409, "Перевод между своими счетами / кредит в траты не входит")
+            await _budget_cat_exists(c, p.category_id)
+            if p.remember and op["counterparty"]:
+                # правило на контрагента; эта операция тоже пойдёт по правилу
+                await c.execute("UPDATE budget.ops SET category_manual = false WHERE id = $1", op_id)
+                changed = await budget.add_rule(c, op["counterparty"], p.category_id)
+            else:
+                await c.execute(
+                    "UPDATE budget.ops SET category_id = $2, category_manual = true, category_source = 'manual' "
+                    "WHERE id = $1", op_id, p.category_id)
+                changed = 1
+    return {"ok": True, "changed": changed}
+
+
+@app.put("/api/budget/ops/{op_id}/splits")
+async def budget_op_splits(op_id: uuid.UUID, s: BudgetSplitsIn):
+    async with pool.acquire() as c:
+        async with c.transaction():
+            op = await c.fetchrow("SELECT amount, kind FROM budget.ops WHERE id = $1", op_id)
+            if not op:
+                raise HTTPException(404, "Операция не найдена")
+            await c.execute("DELETE FROM budget.splits WHERE op_id = $1", op_id)
+            if not s.parts:
+                return {"ok": True}
+            if op["kind"] in budget.EXCLUDED_KINDS:
+                raise HTTPException(409, "Эту операцию разбивать нельзя")
+            try:
+                parts = [(int(x["category_id"]), round(float(x["amount"]), 2)) for x in s.parts]
+            except (KeyError, TypeError, ValueError):
+                raise HTTPException(400, "Части: category_id и amount")
+            if len(parts) < 2 or any(a <= 0 for _, a in parts):
+                raise HTTPException(400, "Нужно минимум 2 части с суммой > 0")
+            if abs(sum(a for _, a in parts) - abs(float(op["amount"]))) > 0.005:
+                raise HTTPException(400, f"Сумма частей должна быть {abs(float(op['amount'])):.2f}")
+            for cid, a in parts:
+                await _budget_cat_exists(c, cid)
+                await c.execute("INSERT INTO budget.splits (op_id, category_id, amount) VALUES ($1, $2, $3)",
+                                op_id, cid, a)
+    return {"ok": True}
+
+
+@app.get("/api/budget/unsorted")
+async def budget_unsorted():
+    async with pool.acquire() as c:
+        return await budget.unsorted(c)
+
+
+@app.post("/api/budget/rules")
+async def budget_rule_add(r: BudgetRuleIn):
+    pattern = r.pattern.strip()
+    if len(pattern) < 3:
+        raise HTTPException(400, "Слишком короткий образец")
+    async with pool.acquire() as c:
+        await _budget_cat_exists(c, r.category_id)
+        changed = await budget.add_rule(c, pattern, r.category_id)
+    return {"ok": True, "changed": changed}
+
+
+@app.post("/api/budget/categories", status_code=201)
+async def budget_category_add(x: BudgetCategoryIn):
+    name = x.name.strip()
+    if not name or x.kind not in ("expense", "income"):
+        raise HTTPException(400, "Название и тип (expense/income)")
+    async with pool.acquire() as c:
+        if await c.fetchval("SELECT 1 FROM budget.categories WHERE lower(name) = lower($1)", name):
+            raise HTTPException(409, "Такая категория уже есть")
+        pos = await c.fetchval("SELECT COALESCE(max(position) + 1, 0) FROM budget.categories")
+        cid = await c.fetchval(
+            "INSERT INTO budget.categories (name, kind, position) VALUES ($1, $2, $3) RETURNING id", name, x.kind, pos)
+    return {"id": cid, "name": name, "kind": x.kind}
 
 
 @app.get("/api/budget/statements")

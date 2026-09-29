@@ -68,8 +68,25 @@ CREATE TABLE IF NOT EXISTS budget.ops (
 
 CREATE INDEX IF NOT EXISTS idx_budget_ops_at ON budget.ops (op_at);
 
+-- этап 2: заметка к операции и откуда взялась категория
+--   category_source: manual | rule (магазин/получатель) | kind (по виду операции) | fallback (Прочее/Поступления)
+ALTER TABLE budget.ops ADD COLUMN IF NOT EXISTS note            text NOT NULL DEFAULT '';
+ALTER TABLE budget.ops ADD COLUMN IF NOT EXISTS category_source text NOT NULL DEFAULT 'rule';
+
+-- разбиение операции по категориям (Лента 18 408 = 15 000 продукты + 3 408 дом).
+-- amount — положительная часть суммы операции; сумма частей = |ops.amount|.
+CREATE TABLE IF NOT EXISTS budget.splits (
+    id           serial         PRIMARY KEY,
+    op_id        uuid           NOT NULL REFERENCES budget.ops(id) ON DELETE CASCADE,
+    category_id  int            NOT NULL REFERENCES budget.categories(id) ON DELETE CASCADE,
+    amount       numeric(14,2)  NOT NULL CHECK (amount > 0)
+);
+
+CREATE INDEX IF NOT EXISTS idx_budget_splits_op ON budget.splits (op_id);
+
 ALTER SCHEMA budget             OWNER TO portal;
 ALTER TABLE  budget.statements  OWNER TO portal;
 ALTER TABLE  budget.categories  OWNER TO portal;
 ALTER TABLE  budget.rules       OWNER TO portal;
 ALTER TABLE  budget.ops         OWNER TO portal;
+ALTER TABLE  budget.splits      OWNER TO portal;

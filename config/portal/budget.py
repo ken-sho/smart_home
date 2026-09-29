@@ -82,7 +82,8 @@ def classify(desc: str, amount: Decimal, owner_short: str) -> dict:
     m = re.search(r"(?:Получатель|Отправитель):\s*(.+?)\.\s*Без НДС", d)
     if m and "через СБП" in d:
         who = m.group(1).strip()
-        if who == owner_short:
+        # регулярка съедает точку после инициала («… П. Без НДС») — сравниваем без неё
+        if who.rstrip(".") == owner_short.rstrip("."):
             return {"kind": "self", "counterparty": "Свои счета", "order_no": None}
         org = re.search(r'\b(ООО|АО|ПАО|НКО|ИП)\b|предприниматель', who, re.I)
         return {"kind": "sbp_org" if org else "sbp_person", "counterparty": who, "order_no": None}
@@ -181,21 +182,25 @@ DEFAULT_CATEGORIES = [
 ]
 
 
-def match_category(op: dict, rules: list[dict]) -> int | None:
-    """rules — [{category_id, pattern}] в порядке приоритета; первое совпадение."""
+def match_category(op: dict, rules: list[dict]) -> tuple[int | None, str | None]:
+    """rules — [{category_id, pattern}] в порядке приоритета; первое совпадение.
+    Возвращает (category_id, источник): 'kind' — правило по виду операции, 'rule' — по тексту."""
     hay = (op.get("counterparty") or "") + " " + (op.get("desc") or "")
     hay_l = hay.lower()
     for r in rules:
         p = r["pattern"]
         if p.startswith("kind:"):
             if op["kind"] == p[5:]:
-                return r["category_id"]
+                return r["category_id"], "kind"
         elif p.lower() in hay_l:
-            return r["category_id"]
-    return None
+            return r["category_id"], "rule"
+    return None, None
 
 
 # ── работа с БД ───────────────────────────────────────────────
+USER_RULE_PRIORITY = 10     # правила, заданные руками, — раньше правил по умолчанию (100) и по виду (900)
+
+
 async def ensure_seed(c):
     """Категории и правила по умолчанию — только если категорий ещё нет."""
     if await c.fetchval("SELECT count(*) FROM budget.categories"):
@@ -223,16 +228,33 @@ async def _rules_and_fallback(c):
     return rules, fb
 
 
-def _pick(op, rules, fb):
+def _pick(op, rules, fb) -> tuple[int | None, str]:
     if op["kind"] in EXCLUDED_KINDS:
-        return None
+        return None, "excluded"
     # зачисления — только в категории доходов; исключение — возврат Ozon (уменьшает трату)
     if op["amount"] > 0 and op["kind"] != "ozon_refund":
         rules = [r for r in rules if r.get("cat_kind") == "income"]
-    cid = match_category(op, rules)
+    cid, src = match_category(op, rules)
     if cid is None:
-        cid = fb.get("Поступления") if op["amount"] > 0 else fb.get("Прочее")
-    return cid
+        return (fb.get("Поступления") if op["amount"] > 0 else fb.get("Прочее")), "fallback"
+    return cid, src
+
+
+async def recategorize(c) -> int:
+    """Прогоняет правила по всем операциям, кроме размеченных вручную."""
+    rules, fb = await _rules_and_fallback(c)
+    rows = await c.fetch(
+        "SELECT id, kind, amount, counterparty, description, category_id, category_source "
+        "FROM budget.ops WHERE NOT category_manual")
+    changed = 0
+    for r in rows:
+        cid, src = _pick({"kind": r["kind"], "amount": r["amount"], "counterparty": r["counterparty"],
+                          "desc": r["description"]}, rules, fb)
+        if cid != r["category_id"] or src != r["category_source"]:
+            await c.execute("UPDATE budget.ops SET category_id = $2, category_source = $3 WHERE id = $1",
+                            r["id"], cid, src)
+            changed += 1
+    return changed
 
 
 async def import_statement(c, parsed: dict, file_path: str | None) -> dict:
@@ -247,50 +269,107 @@ async def import_statement(c, parsed: dict, file_path: str | None) -> dict:
         )
         new = 0
         for o in parsed["ops"]:
+            cid, src = _pick(o, rules, fb)
             ok = await c.fetchval(
-                "INSERT INTO budget.ops (bank, op_at, doc, amount, description, kind, counterparty, order_no, category_id, statement_id) "
-                "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) "
+                "INSERT INTO budget.ops (bank, op_at, doc, amount, description, kind, counterparty, order_no, "
+                "category_id, category_source, statement_id) "
+                "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) "
                 "ON CONFLICT (bank, op_at, doc, amount) DO NOTHING RETURNING 1",
                 parsed["bank"], o["op_at"], o["doc"], o["amount"], o["desc"], o["kind"], o["counterparty"],
-                o["order_no"], _pick(o, rules, fb), sid,
+                o["order_no"], cid, src, sid,
             )
             new += 1 if ok else 0
         dup = len(parsed["ops"]) - new
         await c.execute("UPDATE budget.statements SET ops_new = $2, ops_dup = $3 WHERE id = $1", sid, new, dup)
-    return {"statement_id": str(sid), "new": new, "dup": dup}
+        # разбор мог улучшиться с прошлых загрузок — переопределяем вид у уже сохранённых операций
+        fixed = await reclassify(c, parsed["bank"], _short_name(parsed["owner"]))
+    if fixed:
+        await recategorize(c)
+    return {"statement_id": str(sid), "new": new, "dup": dup, "reclassified": fixed}
+
+
+async def reclassify(c, bank: str, owner_short: str) -> int:
+    """Заново определяет вид/контрагента/№ заказа по назначению платежа."""
+    rows = await c.fetch(
+        "SELECT id, description, amount, kind, counterparty, order_no FROM budget.ops WHERE bank = $1", bank)
+    n = 0
+    for r in rows:
+        k = classify(r["description"], r["amount"], owner_short)
+        if (k["kind"], k["counterparty"], k["order_no"]) != (r["kind"], r["counterparty"], r["order_no"]):
+            await c.execute("UPDATE budget.ops SET kind = $2, counterparty = $3, order_no = $4 WHERE id = $1",
+                            r["id"], k["kind"], k["counterparty"], k["order_no"])
+            n += 1
+    return n
+
+
+def _month_bounds(month: str):
+    y, m = int(month[:4]), int(month[5:7])
+    return datetime(y, m, 1), datetime(y + (m == 12), m % 12 + 1, 1)
 
 
 async def month_summary(c, month: str) -> dict:
-    """Траты/доходы месяца по категориям + операции. month = 'YYYY-MM'."""
-    y, m = int(month[:4]), int(month[5:7])
-    start = datetime(y, m, 1)
-    end = datetime(y + (m == 12), m % 12 + 1, 1)
+    """Траты/доходы месяца по категориям + операции. month = 'YYYY-MM'.
+    Разбитая операция идёт в категории своих частей (со знаком операции)."""
+    start, end = _month_bounds(month)
     cats = await c.fetch("SELECT * FROM budget.categories ORDER BY position, id")
+    kind_of = {ct["id"]: ct["kind"] for ct in cats}
     ops = await c.fetch(
         "SELECT * FROM budget.ops WHERE op_at >= $1 AND op_at < $2 ORDER BY op_at DESC", start, end)
+    split_rows = await c.fetch(
+        "SELECT s.op_id, s.category_id, s.amount FROM budget.splits s "
+        "JOIN budget.ops o ON o.id = s.op_id WHERE o.op_at >= $1 AND o.op_at < $2 ORDER BY s.id", start, end)
+    splits: dict = {}
+    for s in split_rows:
+        splits.setdefault(s["op_id"], []).append(s)
     by_cat: dict = {}
     excluded = Decimal(0)
     for o in ops:
         if o["kind"] in EXCLUDED_KINDS or o["category_id"] is None:
             excluded += o["amount"]
             continue
-        by_cat[o["category_id"]] = by_cat.get(o["category_id"], Decimal(0)) + o["amount"]
-    categories = [{
-        "id": ct["id"], "name": ct["name"], "kind": ct["kind"],
-        "total": float(by_cat.get(ct["id"], 0)),
-    } for ct in cats]
-    expense = -sum((v for cid, v in by_cat.items() if any(ct["id"] == cid and ct["kind"] == "expense" for ct in cats)), Decimal(0))
-    income = sum((v for cid, v in by_cat.items() if any(ct["id"] == cid and ct["kind"] == "income" for ct in cats)), Decimal(0))
+        sign = 1 if o["amount"] > 0 else -1
+        for cid, amt in ([(s["category_id"], sign * s["amount"]) for s in splits[o["id"]]]
+                         if o["id"] in splits else [(o["category_id"], o["amount"])]):
+            by_cat[cid] = by_cat.get(cid, Decimal(0)) + amt
+    expense = -sum((v for cid, v in by_cat.items() if kind_of.get(cid) == "expense"), Decimal(0))
+    income = sum((v for cid, v in by_cat.items() if kind_of.get(cid) == "income"), Decimal(0))
     return {
         "month": month,
         "income": float(income),
         "expense": float(expense),
         "excluded": float(excluded),
-        "categories": categories,
+        "categories": [{"id": ct["id"], "name": ct["name"], "kind": ct["kind"],
+                        "total": float(by_cat.get(ct["id"], 0))} for ct in cats],
         "ops": [{
             "id": str(o["id"]), "op_at": o["op_at"].isoformat(), "amount": float(o["amount"]),
             "kind": o["kind"], "counterparty": o["counterparty"], "order_no": o["order_no"],
-            "category_id": o["category_id"], "description": o["description"],
+            "category_id": o["category_id"], "category_source": o["category_source"],
+            "description": o["description"], "note": o["note"],
             "excluded": o["kind"] in EXCLUDED_KINDS,
+            "splits": [{"category_id": s["category_id"], "amount": float(s["amount"])} for s in splits.get(o["id"], [])],
         } for o in ops],
     }
+
+
+async def unsorted(c) -> list[dict]:
+    """Очередь «Разобрать»: контрагенты без своего правила — попавшие в Прочее/Поступления
+    или в «Переводы людям» только по виду операции. Сгруппировано, все месяцы."""
+    rows = await c.fetch(
+        "SELECT counterparty, kind, count(*) AS n, sum(amount) AS total, max(op_at) AS last_at, "
+        "       min(category_id) AS category_id "
+        "FROM budget.ops "
+        "WHERE NOT category_manual AND kind NOT IN ('self', 'credit') "
+        "  AND (category_source = 'fallback' OR (category_source = 'kind' AND kind = 'sbp_person')) "
+        "GROUP BY counterparty, kind ORDER BY sum(abs(amount)) DESC")
+    return [{"counterparty": r["counterparty"], "kind": r["kind"], "n": r["n"], "total": float(r["total"]),
+             "last_at": r["last_at"].isoformat(), "category_id": r["category_id"]} for r in rows]
+
+
+async def add_rule(c, pattern: str, category_id: int) -> int:
+    """Правило пользователя «контрагент → категория» (перезаписывает прежнее) + пересчёт."""
+    await c.execute(
+        "INSERT INTO budget.rules (category_id, pattern, priority) VALUES ($1, $2, $3) "
+        "ON CONFLICT (pattern) DO UPDATE SET category_id = EXCLUDED.category_id, priority = EXCLUDED.priority",
+        category_id, pattern, USER_RULE_PRIORITY,
+    )
+    return await recategorize(c)
