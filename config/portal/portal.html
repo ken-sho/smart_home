@@ -8,6 +8,8 @@
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/tabler-icons.min.css">
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@highlightjs/cdn-assets@11.9.0/highlight.min.js"></script>
+<!-- графики крипты (свечи + линии плана); версия закреплена — API v5 несовместим -->
+<script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.2.3/dist/lightweight-charts.standalone.production.js"></script>
 <style>
 :root {
   --bg: #111113;
@@ -1127,6 +1129,31 @@ input[type=number]:focus { border-color: var(--accent); }
   filter: blur(7px);
   user-select: none; -webkit-user-select: none;
 }
+/* график монеты: свечи + линии плана; метрики — ниже, цифрами */
+.crypto-chart { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--border); cursor: default; }
+.crypto-chart-bar { display: flex; align-items: center; gap: 4px; }
+.crypto-chart-bar .lbl { flex: 1; font-size: 10px; color: var(--text3); text-transform: uppercase; letter-spacing: .5px; font-family: monospace; }
+.cc-chip {
+  font-size: 10px; padding: 1px 7px; border-radius: 999px; font-family: inherit; cursor: pointer;
+  border: 1px solid var(--border2); background: transparent; color: var(--text2);
+}
+.cc-chip.active { background: var(--accent-bg); border-color: transparent; color: var(--accent-text); }
+.cc-btn {
+  width: 22px; height: 20px; border: none; background: transparent; color: var(--text2);
+  cursor: pointer; font-size: 14px; display: flex; align-items: center; justify-content: center;
+  border-radius: var(--radius-sm);
+}
+.cc-btn:hover { color: var(--text); background: var(--surface2); }
+.crypto-chart-box { position: relative; height: 180px; margin-top: 6px; }
+.crypto-chart-legend {
+  position: absolute; top: 0; left: 2px; z-index: 3; pointer-events: none;
+  font-size: 10px; font-family: var(--mono); color: var(--text2); white-space: nowrap;
+}
+.crypto-chart-empty { font-size: 11px; color: var(--text3); text-align: center; padding: 60px 0; }
+#cryptoChartModal { background: var(--bg); align-items: stretch; justify-content: stretch; }
+.crypto-fs { flex: 1; display: flex; flex-direction: column; padding: 10px 12px; gap: 8px; min-width: 0; }
+.crypto-fs .crypto-chart-box { flex: 1; height: auto; min-height: 200px; }
+.crypto-fs-title { font-size: 14px; font-weight: 600; }
 @keyframes crypto-spin { to { transform: rotate(360deg); } }
 #cryptoRefreshBtn.spinning i { animation: crypto-spin .8s linear infinite; }
 #cryptoRefreshBtn.spinning { color: var(--accent); border-color: var(--accent); }
@@ -2559,6 +2586,18 @@ input[type=number]:focus { border-color: var(--accent); }
   </div>
 </div>
 
+<!-- Crypto: график на весь экран (масштаб и прокрутка включены) -->
+<div class="modal-overlay" id="cryptoChartModal">
+  <div class="crypto-fs">
+    <div class="crypto-chart-bar">
+      <span class="crypto-fs-title" id="cryptoFsTitle" style="flex:1"></span>
+      <span id="cryptoFsChips"></span>
+      <button class="cc-btn" id="cryptoFsClose" title="Закрыть"><i class="ti ti-x"></i></button>
+    </div>
+    <div class="crypto-chart-box" id="cryptoFsBox"></div>
+  </div>
+</div>
+
 <!-- Project modal -->
 <div class="modal-overlay" id="projectModal">
   <div class="modal">
@@ -3979,6 +4018,7 @@ function portalBusy() {
   if (document.getElementById('todoTagsModal').classList.contains('open')) return true;
   if (document.getElementById('quickModal').classList.contains('open')) return true;
   if (document.getElementById('cryptoModal').classList.contains('open')) return true;
+  if (document.getElementById('cryptoChartModal').classList.contains('open')) return true;
   if (typeof quickSaveInFlight !== 'undefined' && quickSaveInFlight > 0) return true;
   if (state.todoOpenList) return true;
   const ae = document.activeElement;
@@ -5343,11 +5383,192 @@ async function loadCrypto() {
   try {
     state.crypto = await apiFetch('/crypto/bootstrap');
     cryptoOnline = true;
+    // свечи для графиков в карточках (90 дней; 30 — это приближение того же ряда)
+    const syms = state.crypto.coins.filter(c => c.symbol !== 'USDT').map(c => c.symbol);
+    const res = await Promise.all(syms.map(s => apiFetch('/crypto/candles/' + s + '?days=90').catch(() => null)));
+    cryptoCandles = {};
+    syms.forEach((s, i) => { if (res[i]) cryptoCandles[s] = res[i].candles; });
   } catch (e) {
     cryptoOnline = false; state.crypto = null;
   }
   updateCryptoStatus();
   renderCrypto();
+}
+
+// ── графики ──
+// В карточке: свечи 30/90 дней, линии плана (T1/T2/стоп/вход) — только при позиции,
+// зона входа — только без позиции, 2 ближайших уровня, метки сделок ▲▼.
+// Прокрутка/масштаб выключены (не перехватываем скролл боковой панели);
+// на весь экран — включены, плюс 365 дней.
+let cryptoCandles = {};          // symbol → свечи за 90 дней
+let cryptoCharts = [];           // созданные графики (удаляем перед перерисовкой)
+let cryptoFsChart = null;        // график на весь экран
+function cryptoPref(key, def) { try { const v = localStorage.getItem('crypto_chart_' + key); return v == null ? def : v; } catch (e) { return def; } }
+function cryptoSetPref(key, v) { try { localStorage.setItem('crypto_chart_' + key, v); } catch (e) {} }
+
+// полупрозрачная полоса зоны входа под свечами (series primitive, lightweight-charts ≥ 4.1)
+class CryptoZoneBand {
+  constructor(lo, hi, color) { this.lo = lo; this.hi = hi; this.color = color; }
+  attached({ series }) { this.series = series; }
+  updateAllViews() {}
+  paneViews() {
+    const self = this;
+    return [{
+      zOrder: () => 'bottom',
+      renderer: () => ({
+        draw(target) {
+          target.useBitmapCoordinateSpace(scope => {
+            const y1 = self.series.priceToCoordinate(self.hi), y2 = self.series.priceToCoordinate(self.lo);
+            if (y1 == null || y2 == null) return;
+            const r = scope.verticalPixelRatio;
+            scope.context.fillStyle = self.color;
+            scope.context.fillRect(0, Math.round(y1 * r), scope.bitmapSize.width, Math.max(1, Math.round((y2 - y1) * r)));
+          });
+        },
+      }),
+    }];
+  }
+}
+
+function cryptoChartLines(c) {
+  // что рисуем поверх свечей: [{price, color, style, title, axis}], зона, цены для автомасштаба
+  const cssv = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+  const green = cssv('--accent'), red = cssv('--red'), blue = cssv('--blue'), gray = cssv('--text3');
+  const lines = [], fit = [];
+  const hasPos = c.advice && !['none'].includes(c.advice.status);
+  const p = c.plan;
+  if (hasPos && p) {
+    if (p.t1) lines.push({ price: p.t1, color: green, style: 2, title: 'T1', axis: true });
+    if (p.t2) lines.push({ price: p.t2, color: green, style: 2, title: 'T2', axis: true });
+    if (p.stop) lines.push({ price: p.stop, color: red, style: 0, title: 'Стоп', axis: true });
+  }
+  const trade = Math.max(c.qty - c.core_qty, 0);
+  if (hasPos && c.entry && trade > 0) lines.push({ price: c.entry, color: blue, style: 0, title: 'Вход', axis: true });
+  lines.forEach(l => fit.push(l.price));
+  let zone = null;
+  const u = cryptoCoin('USDT'), adv = u && u.advice;
+  const cand = adv && adv.status !== 'none' && (adv.candidates || []).find(k => k.symbol === c.symbol);
+  if (!hasPos && cand) { zone = { lo: cand.zone[0], hi: cand.zone[1], color: green + '26' }; fit.push(zone.lo, zone.hi); }
+  const lv = (c.levels || []).slice().sort((a, b) => a - b);
+  const below = lv.filter(v => v < c.price).pop(), above = lv.find(v => v > c.price);
+  [below, above].forEach(v => { if (v != null && !lines.some(l => Math.abs(l.price - v) < 1e-9)) lines.push({ price: v, color: gray, style: 1, title: '', axis: false }); });
+  return { lines, zone, fit };
+}
+
+function cryptoBuildChart(box, c, candles, opts) {
+  const cssv = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+  const up = cssv('--accent'), down = cssv('--red');
+  const LC = LightweightCharts;
+  const chart = LC.createChart(box, {
+    autoSize: true,
+    // логотип TradingView (атрибуция библиотеки) — только на полноэкранном графике
+    layout: { background: { type: 'solid', color: 'transparent' }, textColor: cssv('--text2'), fontSize: 10,
+              fontFamily: getComputedStyle(document.body).fontFamily, attributionLogo: !!opts.interactive },
+    grid: { vertLines: { visible: false }, horzLines: { visible: false } },
+    rightPriceScale: { borderVisible: false, scaleMargins: { top: 0.14, bottom: 0.06 } },
+    timeScale: { borderVisible: false, fixLeftEdge: true, fixRightEdge: true, lockVisibleTimeRangeOnResize: true },
+    crosshair: { mode: LC.CrosshairMode.Magnet,
+                 vertLine: { labelVisible: false, color: cssv('--border2') },
+                 horzLine: { color: cssv('--border2'), labelBackgroundColor: cssv('--surface3') } },
+    handleScroll: !!opts.interactive, handleScale: !!opts.interactive,
+    localization: { locale: 'ru-RU', priceFormatter: v => v.toFixed(4) },
+  });
+  const { lines, zone, fit } = cryptoChartLines(c);
+  const s = chart.addCandlestickSeries({
+    upColor: up, downColor: down, wickUpColor: up, wickDownColor: down, borderVisible: false,
+    priceLineVisible: false, lastValueVisible: true,
+    priceFormat: { type: 'price', precision: 4, minMove: 0.0001 },
+    // линии плана и зона должны попадать в кадр, даже если цена от них далеко
+    autoscaleInfoProvider: orig => {
+      const r = orig();
+      if (!r || !fit.length) return r;
+      r.priceRange.minValue = Math.min(r.priceRange.minValue, ...fit);
+      r.priceRange.maxValue = Math.max(r.priceRange.maxValue, ...fit);
+      return r;
+    },
+  });
+  s.setData(candles);
+  lines.forEach(l => s.createPriceLine({ price: l.price, color: l.color, lineWidth: 1, lineStyle: l.style,
+                                         title: l.title, axisLabelVisible: l.axis }));
+  if (zone) s.attachPrimitive(new CryptoZoneBand(zone.lo, zone.hi, zone.color));
+  // метки сделок из журнала — только на днях, которые есть на графике
+  const days = new Set(candles.map(k => k.time));
+  const marks = (state.crypto.trades || [])
+    .filter(t => t.symbol === c.symbol && (t.side === 'buy' || t.side === 'sell') && days.has(t.date))
+    .map(t => t.side === 'buy'
+      ? { time: t.date, position: 'belowBar', color: up, shape: 'arrowUp', text: '' }
+      : { time: t.date, position: 'aboveBar', color: down, shape: 'arrowDown', text: '' })
+    .sort((a, b) => a.time.localeCompare(b.time));
+  if (marks.length) s.setMarkers(marks);
+  // подпись: дата и закрытие свечи под курсором (по умолчанию — последняя)
+  const legend = document.createElement('div');
+  legend.className = 'crypto-chart-legend';
+  box.appendChild(legend);
+  const fmtLeg = k => {
+    if (!k) return '';
+    const d = new Date(k.time + 'T00:00:00Z').toLocaleDateString('ru-RU', { day: '2-digit', month: 'short', timeZone: 'UTC' });
+    return `${d}  ${k.close.toFixed(4)}  <span style="color:var(--text3)">H ${k.high.toFixed(4)} · L ${k.low.toFixed(4)}</span>`;
+  };
+  legend.innerHTML = fmtLeg(candles[candles.length - 1]);
+  chart.subscribeCrosshairMove(prm => {
+    const k = prm.time ? prm.seriesData.get(s) : null;
+    legend.innerHTML = fmtLeg(k ? { ...k, time: prm.time } : candles[candles.length - 1]);
+  });
+  const n = candles.length;
+  if (opts.days && n > opts.days) chart.timeScale().setVisibleLogicalRange({ from: n - opts.days - 0.5, to: n - 0.5 });
+  else chart.timeScale().fitContent();
+  return chart;
+}
+
+function cryptoMountCharts() {
+  cryptoCharts.forEach(ch => { try { ch.remove(); } catch (e) {} });
+  cryptoCharts = [];
+  document.querySelectorAll('#cryptoBody .crypto-chart').forEach(wrap => {
+    const sym = wrap.dataset.sym, c = cryptoCoin(sym), candles = cryptoCandles[sym];
+    const open = cryptoPref('open_' + sym, '1') === '1';
+    const days = +cryptoPref('days', '90');
+    wrap.innerHTML = `
+      <div class="crypto-chart-bar">
+        <span class="lbl">График · дни (UTC)</span>
+        ${open ? [30, 90].map(d => `<button class="cc-chip${d === days ? ' active' : ''}" data-days="${d}">${d}д</button>`).join('') : ''}
+        ${open ? '<button class="cc-btn cc-fs" title="На весь экран"><i class="ti ti-arrows-maximize"></i></button>' : ''}
+        <button class="cc-btn cc-toggle" title="${open ? 'Свернуть' : 'Показать график'}"><i class="ti ti-chevron-${open ? 'up' : 'down'}"></i></button>
+      </div>
+      ${open ? '<div class="crypto-chart-box"></div>' : ''}`;
+    wrap.onclick = (e) => e.stopPropagation();      // клик по карточке открывает настройки — не здесь
+    wrap.querySelector('.cc-toggle').onclick = () => { cryptoSetPref('open_' + sym, open ? '0' : '1'); cryptoMountCharts(); };
+    wrap.querySelectorAll('.cc-chip').forEach(b => b.onclick = () => { cryptoSetPref('days', b.dataset.days); cryptoMountCharts(); });
+    const fs = wrap.querySelector('.cc-fs'); if (fs) fs.onclick = () => openCryptoFs(sym, days);
+    if (!open) return;
+    const box = wrap.querySelector('.crypto-chart-box');
+    if (!window.LightweightCharts || !candles || !candles.length) {
+      box.innerHTML = `<div class="crypto-chart-empty">${window.LightweightCharts ? 'Нет данных для графика' : 'Библиотека графиков не загрузилась'}</div>`;
+      return;
+    }
+    cryptoCharts.push(cryptoBuildChart(box, c, candles, { days, interactive: false }));
+  });
+}
+
+async function openCryptoFs(sym, days) {
+  const c = cryptoCoin(sym);
+  document.getElementById('cryptoFsTitle').textContent = sym + ' · дневные свечи (UTC)';
+  const box = document.getElementById('cryptoFsBox');
+  const chips = document.getElementById('cryptoFsChips');
+  chips.innerHTML = [30, 90, 365].map(d => `<button class="cc-chip${d === days ? ' active' : ''}" data-days="${d}">${d}д</button>`).join(' ');
+  chips.querySelectorAll('.cc-chip').forEach(b => b.onclick = () => openCryptoFs(sym, +b.dataset.days));
+  document.getElementById('cryptoChartModal').classList.add('open');
+  if (cryptoFsChart) { try { cryptoFsChart.remove(); } catch (e) {} cryptoFsChart = null; }
+  box.innerHTML = '';
+  let candles = cryptoCandles[sym];
+  if (days > 90) {
+    try { candles = (await apiFetch('/crypto/candles/' + sym + '?days=' + days)).candles; } catch (e) {}
+  }
+  if (!window.LightweightCharts || !candles || !candles.length) { box.innerHTML = '<div class="crypto-chart-empty">Нет данных для графика</div>'; return; }
+  cryptoFsChart = cryptoBuildChart(box, c, candles, { days, interactive: true });
+}
+function closeCryptoFs() {
+  document.getElementById('cryptoChartModal').classList.remove('open');
+  if (cryptoFsChart) { try { cryptoFsChart.remove(); } catch (e) {} cryptoFsChart = null; }
 }
 
 function renderCrypto() {
@@ -5388,6 +5609,7 @@ function renderCrypto() {
   el.querySelectorAll('.crypto-actions button').forEach(b => b.onclick = () => openCryptoForm(b.dataset.act));
 
   coins.forEach(c => el.appendChild(cryptoCardEl(c)));
+  cryptoMountCharts();
 
   const sigs = (state.crypto.signals || []).slice(0, 10);
   if (sigs.length) {
@@ -5455,6 +5677,7 @@ function cryptoCardEl(c) {
       ${priceHtml}
     </div>
     ${cryptoAdviceHtml(c)}
+    ${isUsdt ? '' : `<div class="crypto-chart" data-sym="${escapeHtml(c.symbol)}"></div>`}
     <div class="crypto-stats">${stats.map(([l, v]) => `<div><div class="crypto-stat-val">${v}</div><div class="crypto-stat-label">${l}</div></div>`).join('')}</div>
     ${isUsdt ? '' : cryptoIndHtml(c)}`;
   card.onclick = () => openCryptoForm('asset', c.symbol);
@@ -5826,6 +6049,7 @@ async function saveCryptoForm() {
 }
 
 document.getElementById('cryptoRefreshBtn').onclick = cryptoRefresh;
+document.getElementById('cryptoFsClose').onclick = closeCryptoFs;
 document.getElementById('cryptoCancelBtn').onclick = closeCryptoModal;
 document.getElementById('cryptoSaveBtn').onclick = saveCryptoForm;
 document.getElementById('cryptoModalBody').addEventListener('keydown', (e) => {

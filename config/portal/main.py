@@ -1727,6 +1727,26 @@ async def crypto_bootstrap():
     }
 
 
+@app.get("/api/crypto/candles/{symbol}")
+async def crypto_candles(symbol: str, days: int = 90):
+    """Дневные свечи UTC для графика (последний день — незакрытый, по текущей цене)."""
+    days = max(7, min(days, 400))
+    since = datetime.now(ZoneInfo("UTC")) - timedelta(days=days)
+    async with pool.acquire() as c:
+        rows = await c.fetch(
+            "SELECT ts, price FROM crypto.prices WHERE symbol = $1 AND ts > $2 ORDER BY ts",
+            symbol, since,
+        )
+    return {
+        "symbol": symbol,
+        "candles": [
+            {"time": cd["day"].isoformat(), "open": cd["open"], "high": cd["high"],
+             "low": cd["low"], "close": cd["close"]}
+            for cd in crypto._candles([(r["ts"], r["price"]) for r in rows])
+        ],
+    }
+
+
 @app.post("/api/crypto/refresh")
 async def crypto_refresh():
     """Кнопка «Обновить»: свежая цена из CoinGecko (не чаще раза в минуту) + пересчёт."""
