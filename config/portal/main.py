@@ -1663,17 +1663,90 @@ async def _crypto_coin(c, symbol: str) -> dict:
     return {**coin, "usdt": snap["usdt"]}
 
 
+class CryptoPlanIn(BaseModel):
+    t1: float | None = None
+    t2: float | None = None
+    stop: float | None = None
+    restart: bool = False      # новый план: третьи считаются заново с этого момента
+
+
+class CryptoLevelsIn(BaseModel):
+    prices: list[float]
+
+
 @app.get("/api/crypto/bootstrap")
 async def crypto_bootstrap():
     async with pool.acquire() as c:
-        snap = await crypto.portfolio(c)
+        snap = await crypto.snapshot(c)
+        # совет мог смениться после сделки/сверки/правки плана — фиксируем сразу, не ждём тика
+        await crypto.log_signals(c, snap)
         trades = await c.fetch("SELECT * FROM crypto.trades ORDER BY date DESC, created_at DESC")
         cash = await c.fetch("SELECT * FROM crypto.cash ORDER BY date DESC, created_at DESC")
+        signals = await c.fetch("SELECT * FROM crypto.signals ORDER BY ts DESC, id DESC LIMIT 30")
     return {
         **snap,
         "trades": [to_crypto_trade(t) for t in trades],
         "cash": [to_crypto_cash(x) for x in cash],
+        "signals": [
+            {"id": s["id"], "ts": s["ts"].isoformat(), "symbol": s["symbol"], "status": s["status"],
+             "title": s["title"], "reasons": s["reasons"]}
+            for s in signals
+        ],
     }
+
+
+@app.post("/api/crypto/refresh")
+async def crypto_refresh():
+    """Кнопка «Обновить»: свежая цена из CoinGecko (не чаще раза в минуту) + пересчёт."""
+    try:
+        fetched = await crypto.refresh_spot(pool)
+    except Exception as e:
+        limited = any(code in str(e) for code in ("429", "403"))
+        raise HTTPException(502, "CoinGecko ограничил запросы — попробуйте через минуту"
+                                 if limited else f"CoinGecko недоступен: {e}")
+    return {"fetched": fetched}
+
+
+@app.put("/api/crypto/plans/{symbol}")
+async def put_crypto_plan(symbol: str, p: CryptoPlanIn):
+    vals = [p.t1, p.t2, p.stop]
+    if any(v is not None and v <= 0 for v in vals):
+        raise HTTPException(400, "Цены плана должны быть > 0")
+    if p.t1 and p.t2 and p.t2 < p.t1:
+        raise HTTPException(400, "T2 должна быть выше T1")
+    if p.stop and p.t1 and p.stop >= p.t1:
+        raise HTTPException(400, "Стоп должен быть ниже T1")
+    async with pool.acquire() as c:
+        if not await c.fetchval("SELECT 1 FROM crypto.assets WHERE symbol = $1 AND cg_id IS NOT NULL", symbol):
+            raise HTTPException(404, "Монета не найдена")
+        if all(v is None for v in vals):
+            await c.execute("DELETE FROM crypto.plans WHERE symbol = $1", symbol)
+        else:
+            await c.execute(
+                "INSERT INTO crypto.plans (symbol, t1, t2, stop) VALUES ($1, $2, $3, $4) "
+                "ON CONFLICT (symbol) DO UPDATE SET t1 = EXCLUDED.t1, t2 = EXCLUDED.t2, stop = EXCLUDED.stop, "
+                "updated_at = now(), created_at = CASE WHEN $5 THEN now() ELSE crypto.plans.created_at END",
+                symbol, p.t1, p.t2, p.stop, p.restart,
+            )
+        await crypto.log_signals(c, await crypto.snapshot(c))
+    return {"ok": True}
+
+
+@app.put("/api/crypto/levels/{symbol}")
+async def put_crypto_levels(symbol: str, x: CryptoLevelsIn):
+    prices = sorted({round(v, 8) for v in x.prices})
+    if any(v <= 0 for v in prices):
+        raise HTTPException(400, "Уровни должны быть > 0")
+    async with pool.acquire() as c:
+        async with c.transaction():
+            if not await c.fetchval("SELECT 1 FROM crypto.assets WHERE symbol = $1 AND cg_id IS NOT NULL", symbol):
+                raise HTTPException(404, "Монета не найдена")
+            await c.execute("DELETE FROM crypto.levels WHERE symbol = $1", symbol)
+            await c.executemany(
+                "INSERT INTO crypto.levels (symbol, price) VALUES ($1, $2)", [(symbol, v) for v in prices]
+            )
+        await crypto.log_signals(c, await crypto.snapshot(c))
+    return {"ok": True}
 
 
 @app.post("/api/crypto/trades", status_code=201)

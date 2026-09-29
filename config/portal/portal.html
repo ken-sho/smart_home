@@ -1090,6 +1090,33 @@ input[type=number]:focus { border-color: var(--accent); }
 .cf-err { font-size: 11px; color: var(--red); }
 .cf-err:empty { display: none; }
 #cryptoModal .modal { width: 300px; max-height: 90vh; overflow-y: auto; }
+.crypto-adv {
+  margin-top: 10px; padding: 8px 10px; border-radius: var(--radius-sm);
+  border-left: 3px solid var(--border2); background: var(--surface2);
+}
+.crypto-adv-title { font-size: 12.5px; font-weight: 700; }
+.crypto-adv ul { list-style: none; margin-top: 3px; }
+.crypto-adv li { font-size: 11px; color: var(--text2); line-height: 1.45; }
+.crypto-adv.st-take { border-left-color: var(--yellow); background: var(--yellow-bg); }
+.crypto-adv.st-take .crypto-adv-title { color: var(--yellow); }
+.crypto-adv.st-exit { border-left-color: var(--red); background: var(--red-bg); }
+.crypto-adv.st-exit .crypto-adv-title { color: var(--red); }
+.crypto-adv.st-buy { border-left-color: var(--accent); background: var(--accent-bg); }
+.crypto-adv.st-buy .crypto-adv-title { color: var(--accent-text); }
+.crypto-adv.st-noplan { border-left-color: var(--blue); background: var(--blue-bg); }
+.crypto-adv.st-noplan .crypto-adv-title { color: var(--blue); }
+.crypto-adv.st-none .crypto-adv-title { color: var(--text3); font-weight: 600; font-size: 11.5px; }
+.crypto-cand { margin-top: 6px; }
+.crypto-cand summary { font-size: 11px; color: var(--text); cursor: pointer; }
+.crypto-cand ul { margin: 2px 0 0 12px; }
+.crypto-ind { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px 10px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
+.crypto-ind .crypto-stat-val { font-size: 11.5px; }
+.crypto-plan-line { margin-top: 8px; font-size: 10.5px; color: var(--text3); font-family: var(--mono); line-height: 1.5; }
+.crypto-plan-line b { color: var(--text2); font-weight: 600; }
+.crypto-sig-sym { font-size: 10px; font-family: var(--mono); padding: 1px 6px; border-radius: 999px; background: var(--surface3); color: var(--text2); flex-shrink: 0; }
+@keyframes crypto-spin { to { transform: rotate(360deg); } }
+#cryptoRefreshBtn.spinning i { animation: crypto-spin .8s linear infinite; }
+#cryptoRefreshBtn.spinning { color: var(--accent); border-color: var(--accent); }
 
 /* ══════════════════════════════
    NOTES
@@ -5333,6 +5360,24 @@ function renderCrypto() {
 
   coins.forEach(c => el.appendChild(cryptoCardEl(c)));
 
+  const sigs = (state.crypto.signals || []).slice(0, 10);
+  if (sigs.length) {
+    const sl = document.createElement('div'); sl.className = 'svc-section-label'; sl.textContent = 'История советов';
+    el.appendChild(sl);
+    sigs.forEach(s => {
+      const row = document.createElement('div'); row.className = 'svc-row'; row.style.cursor = 'default';
+      const dt = new Date(s.ts);
+      row.innerHTML = `
+        <span class="crypto-sig-sym">${escapeHtml(s.symbol)}</span>
+        <div class="svc-main">
+          <div class="svc-name">${escapeHtml(s.title)}</div>
+          <div class="svc-meta"><span><i class="ti ti-clock"></i>${dt.toLocaleString('ru-RU', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}</span></div>
+        </div>`;
+      row.title = (s.reasons || []).join('\n');
+      el.appendChild(row);
+    });
+  }
+
   const lbl = document.createElement('div'); lbl.className = 'svc-section-label'; lbl.textContent = 'Журнал';
   el.appendChild(lbl);
   const rows = cryptoJournal();
@@ -5365,9 +5410,11 @@ function cryptoCardEl(c) {
     if (c.earn_qty > 0) stats.push(['Начислено Earn', fmtQty(c.earn_qty) + ' ' + c.symbol]);
     if (Math.abs(c.realized) >= 0.005) stats.push(['Зафиксировано', `<span class="${upDown(c.realized)}">${fmtUsdSigned(c.realized)}</span>`]);
   }
+  const priceTime = c.price_ts ? new Date(c.price_ts).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }) : '';
   const priceHtml = isUsdt ? '' : `<div class="crypto-price">
       <div class="crypto-price-val">${fmtPrice(c.price)}</div>
       <div class="crypto-price-chg ${upDown(c.change_24h)}">${c.change_24h == null ? '' : fmtPct(c.change_24h) + ' 24ч'}</div>
+      ${priceTime ? `<div class="crypto-price-chg" style="color:var(--text3)">на ${priceTime}</div>` : ''}
     </div>`;
   card.innerHTML = `
     <div class="vehicle-card-top">
@@ -5378,9 +5425,73 @@ function cryptoCardEl(c) {
       </div>
       ${priceHtml}
     </div>
-    <div class="crypto-stats">${stats.map(([l, v]) => `<div><div class="crypto-stat-val">${v}</div><div class="crypto-stat-label">${l}</div></div>`).join('')}</div>`;
+    ${cryptoAdviceHtml(c)}
+    <div class="crypto-stats">${stats.map(([l, v]) => `<div><div class="crypto-stat-val">${v}</div><div class="crypto-stat-label">${l}</div></div>`).join('')}</div>
+    ${isUsdt ? '' : cryptoIndHtml(c)}`;
   card.onclick = () => openCryptoForm('asset', c.symbol);
+  card.querySelectorAll('details').forEach(d => d.onclick = (e) => e.stopPropagation());
   return card;
+}
+
+function cryptoAdviceHtml(c) {
+  const a = c.advice;
+  if (!a) return '';
+  const li = arr => arr && arr.length ? `<ul>${arr.map(r => `<li>${escapeHtml(r)}</li>`).join('')}</ul>` : '';
+  let extra = '';
+  if (c.symbol === 'USDT' && a.candidates && a.status !== 'none') {
+    extra = a.candidates.map(k => `
+      <details class="crypto-cand"><summary>${escapeHtml(k.symbol)} — ${k.ok ? 'проходит' : 'не сейчас'}${k.rr != null ? ` · R:R ${k.rr.toFixed(1)} / нужно ${k.rr_need}` : ''} · зона ${k.zone.map(v => v.toFixed(4)).join('–')}</summary>
+        ${li(k.reasons)}
+      </details>`).join('');
+  }
+  return `<div class="crypto-adv st-${a.status}">
+    <div class="crypto-adv-title">${c.symbol === 'USDT' ? 'Покупка: ' : ''}${escapeHtml(a.title)}</div>
+    ${li(a.reasons)}${extra}
+  </div>`;
+}
+
+function cryptoIndHtml(c) {
+  const i = c.ind;
+  if (!i) return '';
+  const cell = (label, v, cls) => `<div><div class="crypto-stat-val ${cls || ''}">${v}</div><div class="crypto-stat-label">${label}</div></div>`;
+  const px = v => v == null ? '—' : v.toFixed(4);
+  const rsiCls = i.rsi > 70 ? 'c-down' : (i.rsi < 30 ? 'c-up' : '');
+  const lv = (c.levels || []).slice().sort((a, b) => a - b);
+  const sup = lv.filter(v => v < c.price).pop(), res = lv.find(v => v > c.price);
+  const p = c.plan;
+  const planStr = p && (p.t1 || p.t2 || p.stop)
+    ? `План: T1 <b>${px(p.t1)}</b> · T2 <b>${px(p.t2)}</b> · стоп <b>${px(p.stop)}</b>`
+    : 'План не задан';
+  return `<div class="crypto-ind">
+      ${cell('RSI14', i.rsi == null ? '—' : i.rsi.toFixed(0), rsiCls)}
+      ${cell('MA20', px(i.ma20), c.price > i.ma20 ? 'c-up' : 'c-down')}
+      ${cell('MA50', i.ma50 == null ? '—' : px(i.ma50), i.ma50 == null ? '' : (c.price > i.ma50 ? 'c-up' : 'c-down'))}
+      ${cell('7д', fmtPct(i.chg7) || '—', upDown(i.chg7))}
+      ${cell('30д', fmtPct(i.chg30) || '—', upDown(i.chg30))}
+      ${cell('ATR (ход/день)', (i.atr / c.price * 100).toFixed(1) + '%')}
+    </div>
+    <div class="crypto-plan-line">
+      Закрытие ${fmtDateRu(i.close_day)}: <b>${px(i.close)}</b> · поддержка <b>${px(sup)}</b> · сопротивление <b>${px(res)}</b><br>
+      ${planStr}
+    </div>`;
+}
+
+async function cryptoRefresh() {
+  const btn = document.getElementById('cryptoRefreshBtn');
+  if (btn.classList.contains('spinning')) return;
+  btn.classList.add('spinning');
+  let msg;
+  try {
+    const r = await cryptoSend('/crypto/refresh', 'POST');
+    msg = r && r.fetched ? 'Цены обновлены' : 'Цены уже свежие';
+  } catch (e) {
+    msg = e.message;
+  }
+  await loadCrypto();
+  const c = cryptoCoin('GRAM') || cryptoCoin('TRX');
+  const t = c && c.price_ts ? new Date(c.price_ts).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }) : '';
+  btn.classList.remove('spinning');
+  todoToast(msg + (t ? ' · цены на ' + t : ''));
 }
 
 // журнал: сделки + движения USDT, кроме строк сделок (они внутри сделки)
@@ -5433,9 +5544,9 @@ function coinOptions(selected) {
   return ['GRAM', 'TRX'].map(s => `<option value="${s}"${s === selected ? ' selected' : ''}>${s}</option>`).join('');
 }
 
-function openCryptoForm(kind, symbol) {
+function openCryptoForm(kind, symbol, suggest) {
   if (!cryptoOnline) return;
-  cryptoForm = { kind, symbol };
+  cryptoForm = { kind, symbol, suggest };
   const body = document.getElementById('cryptoModalBody');
   const title = document.getElementById('cryptoModalTitle');
   const dateField = `<label>Дата</label><input type="date" id="cfDate" value="${today()}">`;
@@ -5492,12 +5603,26 @@ function openCryptoForm(kind, symbol) {
     }).join('') + '<div class="cf-hint">Впишите фактические остатки из Wallet. Разница запишется в журнал: плюс — как начисление Earn, минус — как списание.</div>';
   } else if (kind === 'asset') {
     const c = cryptoCoin(symbol);
+    // suggest — план из совета на покупку (после покупки монеты без плана)
+    const sug = cryptoForm.suggest;
+    const p = sug || c.plan || {};
+    const pv = v => v == null ? '' : +(+v).toFixed(4);
     title.textContent = 'Настройки ' + symbol;
     body.innerHTML = `
       <label>Ставка Earn, % годовых</label><input type="text" id="cfApr" inputmode="decimal" value="${c.earn_apr}">
       ${symbol === 'USDT' ? '' : `
       <label>Ядро, шт (не трогаем сигналами продажи)</label><input type="text" id="cfCore" inputmode="decimal" value="${c.core_qty}">
-      <label>Комиссия + спред на сделку, %</label><input type="text" id="cfFee" inputmode="decimal" value="${c.fee_pct}">`}`;
+      <label>Комиссия + спред на сделку, %</label><input type="text" id="cfFee" inputmode="decimal" value="${c.fee_pct}">
+      <div class="section-label">План торговой части${sug ? ' — предложен по совету' : ''}</div>
+      <div class="cf-row">
+        <input type="text" id="cfT1" inputmode="decimal" placeholder="T1" value="${pv(p.t1)}" title="T1 — фиксировать ⅓">
+        <input type="text" id="cfT2" inputmode="decimal" placeholder="T2" value="${pv(p.t2)}" title="T2 — ещё ⅓">
+        <input type="text" id="cfStop" inputmode="decimal" placeholder="стоп" value="${pv(p.stop)}" title="Стоп — по закрытию дня">
+      </div>
+      <label class="cf-check"><input type="checkbox" id="cfRestart"${sug || !c.plan ? ' checked' : ''}> Новый план — счёт проданных третей с нуля</label>
+      <label>Уровни поддержки / сопротивления, через пробел</label>
+      <input type="text" id="cfLevels" value="${(c.levels || []).slice().sort((a, b) => b - a).map(v => +v.toFixed(5)).join(' ')}">
+      <div class="cf-hint">T1/T2/стоп пустые — план удаляется. Стоп и цели срабатывают по дневному закрытию (UTC).</div>`}`;
   }
   document.getElementById('cryptoModalErr').textContent = '';
   document.getElementById('cryptoSaveBtn').disabled = false;
@@ -5557,6 +5682,20 @@ async function saveCryptoForm() {
     if (symbol !== 'USDT') { body.core_qty = parseNum(val('cfCore')); body.fee_pct = parseNum(val('cfFee')); }
     if (Object.values(body).some(v => v == null || v < 0)) { err.textContent = 'Нужны числа ≥ 0'; return; }
     reqs.push(['/crypto/assets/' + symbol, 'PATCH', body]);
+    if (symbol !== 'USDT') {
+      const c = cryptoCoin(symbol);
+      const plan = { t1: parseNum(val('cfT1')), t2: parseNum(val('cfT2')), stop: parseNum(val('cfStop')), restart: document.getElementById('cfRestart').checked };
+      const old = c.plan || {};
+      const same = (a, b) => (a == null && b == null) || (a != null && b != null && Math.abs(a - b) < 1e-9);
+      if (plan.restart || !same(plan.t1, old.t1) || !same(plan.t2, old.t2) || !same(plan.stop, old.stop))
+        reqs.push(['/crypto/plans/' + symbol, 'PUT', plan]);
+      const raw = val('cfLevels').trim();
+      const levels = raw ? raw.split(/[\s;]+/).map(parseNum) : [];
+      if (levels.some(v => v == null || v <= 0)) { err.textContent = 'Уровни: числа > 0 через пробел'; return; }
+      const oldLv = (c.levels || []).slice().sort((a, b) => a - b), newLv = levels.slice().sort((a, b) => a - b);
+      if (oldLv.length !== newLv.length || oldLv.some((v, i) => Math.abs(v - newLv[i]) > 1e-9))
+        reqs.push(['/crypto/levels/' + symbol, 'PUT', { prices: levels }]);
+    }
   }
   const btn = document.getElementById('cryptoSaveBtn');
   btn.disabled = true;
@@ -5569,9 +5708,19 @@ async function saveCryptoForm() {
   }
   closeCryptoModal();
   await loadCrypto();
+  // купили монету без плана — сразу предлагаем план (из совета, если он есть)
+  if (kind === 'buy') {
+    const sym = reqs[0][2].symbol, c = cryptoCoin(sym);
+    if (c && !c.plan) {
+      const u = cryptoCoin('USDT'), adv = u && u.advice;
+      const cand = adv && adv.candidates && adv.candidates.find(k => k.symbol === sym);
+      openCryptoForm('asset', sym, cand ? cand.plan : null);
+      document.getElementById('cryptoModalErr').textContent = 'Задайте план для этой покупки (T1 / T2 / стоп).';
+    }
+  }
 }
 
-document.getElementById('cryptoRefreshBtn').onclick = loadCrypto;
+document.getElementById('cryptoRefreshBtn').onclick = cryptoRefresh;
 document.getElementById('cryptoCancelBtn').onclick = closeCryptoModal;
 document.getElementById('cryptoSaveBtn').onclick = saveCryptoForm;
 document.getElementById('cryptoModalBody').addEventListener('keydown', (e) => {
