@@ -1626,6 +1626,12 @@ class CryptoParamIn(BaseModel):
     value: float
 
 
+class CryptoSalaryNotifyIn(BaseModel):
+    amount: float
+    fiat: float = 0
+    rub: float | None = None
+
+
 class CryptoReconcileIn(BaseModel):
     symbol: str
     qty: float                 # фактический остаток в Wallet
@@ -1843,6 +1849,23 @@ async def create_crypto_cash(x: CryptoCashIn):
                 round(x.rub, 2) if fiat and x.rub else None, x.rate if fiat else None, entry_id,
             )
     return to_crypto_cash(r)
+
+
+@app.post("/api/crypto/notify/salary")
+async def crypto_notify_salary(x: CryptoSalaryNotifyIn):
+    """Сводка в Telegram после внесения зарплаты (форма шлёт после всех записей)."""
+    token = (await get_setting("telegram_bot_token") or "").strip()
+    chat_id = (await get_setting("telegram_chat_id") or "").strip()
+    if not token or not chat_id:
+        return {"ok": False, "error": "Telegram не настроен"}
+    thread_id = (await get_setting("telegram_thread_id") or "").strip() or None
+    async with pool.acquire() as c:
+        snap = await crypto.snapshot(c)
+    try:
+        await send_message(token, chat_id, crypto.salary_message(x.amount, x.fiat, x.rub, snap), thread_id=thread_id)
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+    return {"ok": True}
 
 
 @app.get("/api/crypto/fiat-quote")
@@ -2537,6 +2560,33 @@ async def notify_tick():
             await _todo_tick(c, token, chat_id, thread_id)
         except Exception as e:
             print(f"[scheduler] ошибка todo-тика: {e}")
+
+        # Крипто: смена советов и события закрытия дня → Telegram
+        try:
+            await _crypto_notify(c, token, chat_id, thread_id)
+        except Exception as e:
+            print(f"[scheduler] ошибка крипто-оповещений: {e}")
+
+
+async def _crypto_notify(c, token, chat_id, thread_id):
+    """Рассылает неотправленные строки crypto.signals. Тихие переходы помечаются
+       отправленными без сообщения; упавшая отправка повторится на следующем тике,
+       но не дольше суток (старое уже неактуально)."""
+    rows = await c.fetch("SELECT * FROM crypto.signals WHERE NOT sent ORDER BY id")
+    for s in rows:
+        prev = await c.fetchval(
+            "SELECT status FROM crypto.signals WHERE symbol = $1 AND id < $2 AND status <> 'event' "
+            "ORDER BY id DESC LIMIT 1", s["symbol"], s["id"],
+        )
+        text = crypto.signal_message(s, prev)
+        stale = datetime.now(ZoneInfo("UTC")) - s["ts"] > timedelta(days=1)
+        if text and not stale:
+            try:
+                await send_message(token, chat_id, text, thread_id=thread_id)
+            except Exception as e:
+                print(f"[scheduler] крипто-оповещение не отправлено ({s['symbol']}): {e}")
+                continue
+        await c.execute("UPDATE crypto.signals SET sent = true WHERE id = $1", s["id"])
 
 
 # ══════════════════════════════════════════════════════════════

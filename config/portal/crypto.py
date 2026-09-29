@@ -491,24 +491,88 @@ async def snapshot(c) -> dict:
 
 
 async def log_signals(c, snap) -> int:
-    """Пишет в crypto.signals смену совета (по ключу статуса). Возвращает число новых строк."""
+    """Пишет в crypto.signals смену совета (по ключу статуса) и события закрытия
+    дня (пробой ручного уровня, пересечение MA200; status = 'event', ключ с датой —
+    пишется один раз). Возвращает число новых строк."""
     n = 0
     for coin in snap["coins"]:
         adv = coin.get("advice")
-        if not adv:
+        if adv:
+            key = adv["status"] + (":" + adv["symbol"] if adv.get("symbol") else "")
+            last = await c.fetchval(
+                "SELECT key FROM crypto.signals WHERE symbol = $1 AND status <> 'event' "
+                "ORDER BY ts DESC, id DESC LIMIT 1", coin["symbol"]
+            )
+            if last != key:
+                await c.execute(
+                    "INSERT INTO crypto.signals (symbol, key, status, title, reasons) VALUES ($1, $2, $3, $4, $5)",
+                    coin["symbol"], key, adv["status"], adv["title"], adv["reasons"],
+                )
+                n += 1
+        ind = coin.get("ind")
+        if not ind:
             continue
-        key = adv["status"] + (":" + adv["symbol"] if adv.get("symbol") else "")
-        last = await c.fetchval(
-            "SELECT key FROM crypto.signals WHERE symbol = $1 ORDER BY ts DESC, id DESC LIMIT 1", coin["symbol"]
-        )
-        if last == key:
-            continue
-        await c.execute(
-            "INSERT INTO crypto.signals (symbol, key, status, title, reasons) VALUES ($1, $2, $3, $4, $5)",
-            coin["symbol"], key, adv["status"], adv["title"], adv["reasons"],
-        )
-        n += 1
+        events = []
+        for lv in coin.get("levels") or []:
+            if (ind["prev_close"] - lv) * (ind["close"] - lv) < 0:
+                up = ind["close"] > lv
+                events.append((f"lvl:{ind['close_day']}:{lv:g}",
+                               f"Закрытием пробит уровень {_px(lv)} {'вверх' if up else 'вниз'}",
+                               [f"Закрытие {ind['close_day']}: {_px(ind['close'])} (было {_px(ind['prev_close'])})",
+                                "Проверьте сетку алертов CMC"]))
+        if ind.get("ma200_cross"):
+            up = ind["ma200_cross"] == "up"
+            events.append((f"ma200:{ind['close_day']}",
+                           f"Закрытием пересекли MA200 {_px(ind['ma200'])} {'вверх' if up else 'вниз'}",
+                           [f"Закрытие {ind['close_day']}: {_px(ind['close'])}",
+                            "Долгосрочный тренд разворачивается вверх" if up else "Долгосрочный тренд ослаб"]))
+        for key, title, reasons in events:
+            if await c.fetchval("SELECT 1 FROM crypto.signals WHERE symbol = $1 AND key = $2", coin["symbol"], key):
+                continue
+            await c.execute(
+                "INSERT INTO crypto.signals (symbol, key, status, title, reasons) VALUES ($1, $2, 'event', $3, $4)",
+                coin["symbol"], key, title, reasons,
+            )
+            n += 1
     return n
+
+
+NOTIFY_ICONS = {"take": "🟡", "exit": "🔴", "buy": "🟢", "noplan": "🔵", "event": "📏"}
+LOUD = ("take", "exit", "buy", "noplan")
+
+
+def signal_message(sig, prev_status) -> str | None:
+    """Текст Telegram-сообщения для строки crypto.signals; None — не отправлять
+    (тихие переходы вроде «Держать» ↔ «нет позиции»)."""
+    st, sym = sig["status"], sig["symbol"]
+    who = "Покупка" if sym == "USDT" else sym
+    if st == "event":
+        head = f"📏 {sym}: {sig['title']}"
+    elif st in LOUD:
+        head = f"{NOTIFY_ICONS[st]} {who}: {sig['title']}"
+    elif prev_status in ("take", "exit", "buy"):
+        head = f"⚪ {who}: сигнал снят — {sig['title']}"
+    else:
+        return None
+    lines = [head] + [f"• {r}" for r in (sig["reasons"] or [])]
+    lines.append("\nПортал → Финансы → Крипто")
+    return "\n".join(lines)
+
+
+def salary_message(amount, fiat, rub, snap) -> str:
+    usdt = next(c for c in snap["coins"] if c["symbol"] == "USDT")
+    adv = usdt.get("advice") or {}
+    lines = [f"💵 Зарплата: +{_usd(amount)} USDT"]
+    if fiat:
+        lines.append(f"В фиат: {_usd(fiat)}" + (f" → {rub:,.0f} ₽ (в Д/К)".replace(",", " ") if rub else ""))
+    lines.append(f"Свободно USDT: {_usd(snap['usdt'])}")
+    lines.append(f"\nПокупка: {adv.get('title', '—')}")
+    lines += [f"• {r}" for r in adv.get("reasons", [])]
+    for k in adv.get("candidates", []):
+        rr = f"R:R {k['rr']:.1f} / нужно {k['rr_need']:g}" if k["rr"] else "R:R —"
+        lines.append(f"• {k['symbol']}: {'проходит' if k['ok'] else 'не сейчас'} · {rr} · зона {_px(k['zone'][0])}–{_px(k['zone'][1])}")
+    lines.append("\nПортал → Финансы → Крипто")
+    return "\n".join(lines)
 
 
 async def refresh_spot(pool) -> bool:

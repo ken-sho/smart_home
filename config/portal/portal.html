@@ -5740,6 +5740,7 @@ async function saveCryptoForm() {
   const err = document.getElementById('cryptoModalErr');
   const val = id => document.getElementById(id).value;
   const reqs = [];
+  let salaryInfo = null;     // зарплата → после записи шлём сводку в Telegram
   err.textContent = '';
   if (kind === 'buy' || kind === 'sell') {
     const qty = parseNum(val('cfQty')), total = parseNum(val('cfTotal'));
@@ -5754,6 +5755,7 @@ async function saveCryptoForm() {
     const toDk = document.getElementById('cfToDk').checked, rub = parseNum(val('cfRub'));
     if (f > 0 && toDk && !(rub > 0)) { err.textContent = 'Укажите, сколько пришло ₽ (или снимите галочку Д/К)'; return; }
     reqs.push(['/crypto/cash', 'POST', { kind: 'salary', amount: a, date: val('cfDate') || null }]);
+    salaryInfo = { amount: a, fiat: f, rub: f > 0 ? (rub || null) : null };
     if (f > 0) reqs.push(['/crypto/cash', 'POST', { kind: 'fiat_out', amount: f, date: val('cfDate') || null, note: 'из зарплаты',
       rub: rub || null, rate: cryptoQuote ? cryptoQuote.rate : null, to_dk: toDk }]);
   } else if (kind === 'fiat') {
@@ -5805,6 +5807,7 @@ async function saveCryptoForm() {
   }
   closeCryptoModal();
   await loadCrypto();
+  if (salaryInfo) cryptoSend('/crypto/notify/salary', 'POST', salaryInfo).catch(() => {});
   const dkReq = reqs.find(([, , b]) => b && b.kind === 'fiat_out' && (b.to_dk || b.dk_only) && b.rub);
   if (dkReq) {
     todoToast(`Приход ${Math.round(dkReq[2].rub).toLocaleString('ru-RU')} ₽ записан в Д/К`);
