@@ -36,6 +36,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 import crypto
+import budget
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 # Предпочитаем раздельные переменные (удобно для systemd Environment=,
@@ -69,7 +70,10 @@ SCHEMA_FILES = [
     BASE_DIR / "cal_schema.sql",
     BASE_DIR / "auth2fa_schema.sql",
     BASE_DIR / "crypto_schema.sql",
+    BASE_DIR / "budget_schema.sql",
 ]
+# оригиналы банковских справок (ФИО, счёт, получатели) — только на Core, не в git
+STATEMENTS_DIR = Path(os.getenv("STATEMENTS_DIR", BASE_DIR.parent / "statements"))
 
 pool: asyncpg.Pool | None = None
 scheduler: AsyncIOScheduler | None = None
@@ -95,6 +99,7 @@ async def lifespan(app: FastAPI):
         for sql in SCHEMA_FILES:
             if sql.exists():
                 await c.execute(sql.read_text(encoding="utf-8"))
+        await budget.ensure_seed(c)   # категории и правила трат по умолчанию
     # регистрируем вебхук бота, если задан токен (не валим старт при ошибке)
     try:
         if await get_setting("telegram_bot_token"):
@@ -1594,6 +1599,62 @@ async def delete_service(service_id: uuid.UUID):
         res = await c.execute("DELETE FROM garage.services WHERE id = $1", service_id)
     if res.endswith("0"):
         raise HTTPException(404, "Запись не найдена")
+
+
+# ══════════════════════════════════════════════════════════════
+#  BUDGET API (схема budget: statements · ops · categories · rules)
+#  Финансы → Траты: импорт справки Ozon Банка (PDF), траты по категориям.
+# ══════════════════════════════════════════════════════════════
+@app.post("/api/budget/import")
+async def budget_import(file: UploadFile = File(...)):
+    """PDF-справка о движении средств → операции. Повторная загрузка того же
+       периода дублей не создаёт. Справка не сошлась с итогами — ничего не пишем."""
+    raw = await file.read()
+    if not raw.startswith(b"%PDF"):
+        raise HTTPException(400, "Нужен PDF-файл справки")
+    if len(raw) > 30 * 1024 * 1024:
+        raise HTTPException(400, "Файл больше 30 МБ")
+    STATEMENTS_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
+    path = STATEMENTS_DIR / f"ozon_{hashlib.sha256(raw).hexdigest()[:16]}.pdf"
+    fresh = not path.exists()
+    path.write_bytes(raw)
+    try:
+        parsed = await asyncio.to_thread(budget.parse_ozon_pdf, str(path))
+    except Exception as e:
+        if fresh:
+            path.unlink(missing_ok=True)
+        raise HTTPException(400, f"Не удалось разобрать справку: {e}")
+    async with pool.acquire() as c:
+        res = await budget.import_statement(c, parsed, str(path))
+    counted = [o for o in parsed["ops"] if o["kind"] not in budget.EXCLUDED_KINDS]
+    return {
+        **res,
+        "period_from": parsed["period_from"].isoformat(),
+        "period_to": parsed["period_to"].isoformat(),
+        "total": len(parsed["ops"]),
+        "income": float(sum(o["amount"] for o in counted if o["amount"] > 0)),
+        "expense": float(-sum(o["amount"] for o in counted if o["amount"] < 0)),
+        "excluded": len(parsed["ops"]) - len(counted),
+    }
+
+
+@app.get("/api/budget/month/{month}")
+async def budget_month(month: str):
+    if not re.fullmatch(r"\d{4}-\d{2}", month):
+        raise HTTPException(400, "Месяц в формате YYYY-MM")
+    async with pool.acquire() as c:
+        return await budget.month_summary(c, month)
+
+
+@app.get("/api/budget/statements")
+async def budget_statements():
+    async with pool.acquire() as c:
+        rows = await c.fetch("SELECT * FROM budget.statements ORDER BY uploaded_at DESC LIMIT 50")
+    return [{
+        "id": str(r["id"]), "bank": r["bank"],
+        "period_from": r["period_from"].isoformat(), "period_to": r["period_to"].isoformat(),
+        "ops_new": r["ops_new"], "ops_dup": r["ops_dup"], "uploaded_at": r["uploaded_at"].isoformat(),
+    } for r in rows]
 
 
 # ══════════════════════════════════════════════════════════════

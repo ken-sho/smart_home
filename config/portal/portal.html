@@ -642,6 +642,26 @@ input[type=number]:focus { border-color: var(--accent); }
 }
 .fin-eye.revealed { color: var(--accent); border-color: var(--accent); }
 
+/* Траты — категории из справки банка */
+.bud-sum { display: flex; gap: 10px; padding: 10px 12px; margin-bottom: 8px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); text-align: center; }
+.bud-sum > div { flex: 1; }
+.bud-cat { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 5px; padding: 8px 10px; }
+.bud-cat-top { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+.bud-cat-name { flex: 1; font-size: 13px; font-weight: 600; }
+.bud-cat-n { font-size: 10px; color: var(--text3); font-family: var(--mono); }
+.bud-cat .credit-amount { min-width: 80px; }
+.bud-bar { height: 3px; background: var(--surface3); border-radius: 2px; margin-top: 6px; overflow: hidden; }
+.bud-bar > div { height: 100%; background: var(--accent); border-radius: 2px; }
+.bud-ops { margin-top: 8px; border-top: 1px solid var(--border); padding-top: 6px; max-height: 320px; overflow-y: auto;
+           scrollbar-width: thin; scrollbar-color: var(--border2) transparent; }
+.bud-ops::-webkit-scrollbar { width: 3px; }
+.bud-ops::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }
+.bud-op { display: flex; gap: 8px; align-items: baseline; font-size: 11.5px; padding: 3px 0; }
+.bud-op-d { color: var(--text3); font-family: var(--mono); font-size: 10.5px; flex-shrink: 0; }
+.bud-op-c { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text2); }
+.bud-op .credit-amount { font-size: 11.5px; min-width: 70px; }
+.bud-note { font-size: 10.5px; color: var(--text3); padding: 6px 2px 12px; }
+
 /* Д/К — переключатель типа в форме */
 .fin-kind-row { display: flex; gap: 6px; }
 .fin-kind {
@@ -2180,12 +2200,15 @@ input[type=number]:focus { border-color: var(--accent); }
     <div class="fin-modes" id="finModes">
       <button class="fin-mode active" data-mode="credits">Кредиты</button>
       <button class="fin-mode" data-mode="dk">Д/К</button>
+      <button class="fin-mode" data-mode="budget">Траты</button>
       <button class="fin-mode" data-mode="crypto">Крипто</button>
     </div>
     <div class="fin-period" id="finPeriod">
       <select id="finYear" class="fin-select" title="Год"></select>
       <select id="finMonth" class="fin-select" style="flex:1" title="Месяц"></select>
       <button class="btn-primary fin-add" id="addCreditBtn" title="Добавить кредит"><i class="ti ti-plus"></i></button>
+      <button class="btn-primary fin-add" id="budgetImportBtn" title="Загрузить справку Ozon Банка (PDF)" style="display:none"><i class="ti ti-file-upload"></i></button>
+      <input type="file" id="budgetFile" accept="application/pdf,.pdf" style="display:none">
     </div>
     <div class="fin-form" id="finForm">
       <div class="fin-kind-row" id="finKindRow" style="display:none">
@@ -3485,7 +3508,7 @@ let financeOverdue = 0;             // всего просрочек (для б�
 let financeEditId = null;           // id редактируемой строки (null = добавление)
 // 'credits' | 'dk' | 'crypto' — последний выбранный режим переживает перезагрузку
 let financeMode = (() => {
-  try { const m = localStorage.getItem('portal_fin_mode'); return ['credits', 'dk', 'crypto'].includes(m) ? m : 'credits'; }
+  try { const m = localStorage.getItem('portal_fin_mode'); return ['credits', 'dk', 'budget', 'crypto'].includes(m) ? m : 'credits'; }
   catch (e) { return 'credits'; }
 })();
 let finEntryKind = 'out';           // тип события в форме Д/К
@@ -3586,6 +3609,7 @@ async function loadFinance() {
     state.currentMonth = data.current_month;
     state.finance.credits = data.credits;
     if (financeMode === 'dk') await loadDK(state.currentMonth, true);
+    if (financeMode === 'budget') await loadBudget(state.currentMonth, true);
   } catch (e) {
     financeOnline = false;
     state.finance.credits = [];
@@ -3630,12 +3654,14 @@ async function loadDK(month, quiet) {
 // «Крипто» живёт в своём блоке (#cryptoBody): месяц/год и нижняя сводка
 // ему не нужны, зато нужны своя кнопка обновления и свой индикатор БД.
 function applyFinModeLayout() {
-  const crypto = financeMode === 'crypto';
+  const crypto = financeMode === 'crypto', bud = financeMode === 'budget';
   document.querySelectorAll('#finModes .fin-mode').forEach(b => b.classList.toggle('active', b.dataset.mode === financeMode));
   const show = (id, on) => { const el = document.getElementById(id); if (el) el.style.display = on ? '' : 'none'; };
   show('finPeriod', !crypto);
   show('creditList', !crypto);
-  show('finSummary', !crypto);
+  show('finSummary', !crypto && !bud);
+  show('addCreditBtn', !bud);
+  show('budgetImportBtn', bud);
   show('fin-month-rem', !crypto);
   show('finance-conn', !crypto);
   show('cryptoBody', crypto);
@@ -3651,7 +3677,8 @@ function setFinMode(mode) {
   closeCreditForm();
   if (mode === 'crypto') { if (typeof loadCrypto === 'function') loadCrypto(); return; }
   if (!financeOnline) { renderFinance(); return; }
-  if (mode === 'dk') loadDK(state.currentMonth);
+  if (mode === 'budget') loadBudget(state.currentMonth);
+  else if (mode === 'dk') loadDK(state.currentMonth);
   else loadFinMonth(state.currentMonth);
 }
 
@@ -3690,7 +3717,8 @@ function finPeriodChange() {
   if (y > curY || (y === curY && m > curM)) m = (y === curY ? curM : 12);  // клампим будущее
   const month = y + '-' + String(m).padStart(2, '0');
   if (month > financeCurrentMonth) { renderFinPeriod(); return; }
-  if (financeMode === 'dk') loadDK(month); else loadFinMonth(month);
+  if (financeMode === 'budget') loadBudget(month);
+  else if (financeMode === 'dk') loadDK(month); else loadFinMonth(month);
 }
 
 // ── рендер (диспетчер) ──
@@ -3712,8 +3740,100 @@ function renderFinance() {
     return;
   }
   addBtn.classList.remove('disabled');
-  if (financeMode === 'dk') renderDK(); else renderCredits();
+  if (financeMode === 'budget') renderBudget();
+  else if (financeMode === 'dk') renderDK(); else renderCredits();
 }
+
+// ── режим «Траты»: операции из справки Ozon Банка по категориям ──
+state.budget = null;           // { month, income, expense, excluded, categories, ops }
+let budgetOpenCat = null;      // раскрытая категория (id)
+async function loadBudget(month, quiet) {
+  if (!financeOnline || month > financeCurrentMonth) return;
+  try {
+    state.budget = await apiFetch('/budget/month/' + month);
+    state.currentMonth = month;
+  } catch (e) { state.budget = null; }
+  if (quiet) return;
+  closeCreditForm();
+  updateFinanceStatus();
+  renderFinPeriod();
+  renderFinance();
+}
+
+function fmtRub(n) { return (n < 0 ? '−' : '') + Math.round(Math.abs(n)).toLocaleString('ru-RU') + ' ₽'; }
+
+function renderBudget() {
+  const el = document.getElementById('creditList');
+  const b = state.budget;
+  if (!b) { el.innerHTML = '<div class="empty">Не удалось загрузить траты.</div>'; return; }
+  if (!b.ops.length) {
+    el.innerHTML = `<div class="empty">Операций за месяц нет.<br>Загрузите справку Ozon Банка — кнопка <i class="ti ti-file-upload"></i> справа от месяца.<br><span style="color:var(--text3)">Повторная загрузка дублей не создаёт.</span></div>`;
+    return;
+  }
+  const exp = b.categories.filter(c => c.kind === 'expense' && c.total < 0).sort((x, y) => x.total - y.total);
+  const inc = b.categories.filter(c => c.kind === 'income' && c.total > 0).sort((x, y) => y.total - x.total);
+  const maxExp = exp.length ? -exp[0].total : 1;
+  const rest = b.income - b.expense;
+  el.innerHTML = `
+    <div class="bud-sum">
+      <div><div class="fin-stat-val green credit-amount">${fmtRub(b.income)}</div><div class="fin-stat-label">доход</div></div>
+      <div><div class="fin-stat-val red credit-amount">${fmtRub(b.expense)}</div><div class="fin-stat-label">траты</div></div>
+      <div><div class="fin-stat-val credit-amount ${rest >= 0 ? 'green' : 'red'}">${fmtRub(rest)}</div><div class="fin-stat-label">остаток</div></div>
+    </div>
+    <div class="svc-section-label">Траты по категориям</div>
+    <div id="budExp"></div>
+    ${inc.length ? '<div class="svc-section-label">Доходы</div><div id="budInc"></div>' : ''}
+    <div class="bud-note">Переводы между своими счетами и погашение кредитов в траты не входят.</div>`;
+  const put = (box, c, max) => {
+    const row = document.createElement('div');
+    row.className = 'bud-cat' + (budgetOpenCat === c.id ? ' open' : '');
+    const ops = b.ops.filter(o => o.category_id === c.id);
+    row.innerHTML = `
+      <div class="bud-cat-top">
+        <span class="bud-cat-name">${escapeHtml(c.name)}</span>
+        <span class="bud-cat-n">${ops.length}</span>
+        <span class="credit-amount">${fmtRub(Math.abs(c.total))}</span>
+      </div>
+      ${max ? `<div class="bud-bar"><div style="width:${Math.max(2, Math.abs(c.total) / max * 100)}%"></div></div>` : ''}
+      ${budgetOpenCat === c.id ? `<div class="bud-ops">${ops.map(o => `
+        <div class="bud-op">
+          <span class="bud-op-d">${o.op_at.slice(8, 10)}.${o.op_at.slice(5, 7)}</span>
+          <span class="bud-op-c">${escapeHtml(o.counterparty)}${o.order_no ? ` <span style="color:var(--text3)">№${escapeHtml(o.order_no.split('-').pop())}</span>` : ''}</span>
+          <span class="credit-amount ${o.amount > 0 ? 'c-up' : ''}">${fmtRub(o.amount)}</span>
+        </div>`).join('')}</div>` : ''}`;
+    row.querySelector('.bud-cat-top').onclick = () => { budgetOpenCat = budgetOpenCat === c.id ? null : c.id; renderBudget(); };
+    box.appendChild(row);
+  };
+  exp.forEach(c => put(document.getElementById('budExp'), c, maxExp));
+  inc.forEach(c => put(document.getElementById('budInc'), c, 0));
+}
+
+async function budgetUpload(file) {
+  const btn = document.getElementById('budgetImportBtn');
+  btn.classList.add('disabled');
+  todoToast('Разбираю справку…');
+  try {
+    const fd = new FormData();
+    fd.append('file', file);
+    const headers = {};
+    if (TG_INIT) headers['X-Telegram-Init-Data'] = TG_INIT;
+    const r = await fetch(API + '/budget/import', { method: 'POST', headers, body: fd });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(d.detail || ('Ошибка ' + r.status));
+    const p = s => s.slice(8, 10) + '.' + s.slice(5, 7);
+    todoToast(`Справка ${p(d.period_from)}–${p(d.period_to)}: новых ${d.new}, дублей ${d.dup}`);
+    await loadBudget(state.currentMonth);
+  } catch (e) {
+    todoToast(e.message);
+  }
+  btn.classList.remove('disabled');
+}
+document.getElementById('budgetImportBtn').onclick = () => document.getElementById('budgetFile').click();
+document.getElementById('budgetFile').onchange = (e) => {
+  const f = e.target.files[0];
+  e.target.value = '';
+  if (f) budgetUpload(f);
+};
 
 // ── режим «Кредиты» ──
 function renderCredits() {
@@ -4037,6 +4157,7 @@ async function softRefresh() {
     if (typeof loadTodo === 'function' && !state.todoOpenList) await loadTodo();
     if (financeOnline) {
       if (financeMode === 'dk') await loadDK(state.currentMonth);
+      else if (financeMode === 'budget') await loadBudget(state.currentMonth);
       else await loadFinMonth(state.currentMonth);
     } else {
       await loadFinance();
