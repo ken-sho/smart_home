@@ -297,7 +297,18 @@ async def register_webhook() -> dict:
         await set_webhook(token, hook_url, secret)
     except Exception as e:
         return {"ok": False, "error": str(e)}
+    # меню «/» в чате с ботом; ошибка здесь не мешает вебхуку
+    try:
+        await asyncio.to_thread(_bot_api, token, "setMyCommands", {"commands": BOT_COMMANDS})
+    except Exception as e:
+        print("[webhook] setMyCommands:", e)
     return {"ok": True, "url": hook_url}
+
+
+BOT_COMMANDS = [
+    {"command": "portal", "description": "Открыть портал"},
+    {"command": "wallet", "description": "Открыть Telegram Wallet"},
+]
 
 
 @app.middleware("http")
