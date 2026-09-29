@@ -1727,6 +1727,18 @@ async def budget_op_splits(op_id: uuid.UUID, s: BudgetSplitsIn):
     return {"ok": True}
 
 
+@app.get("/api/budget/history")
+async def budget_history(months: int = 12):
+    async with pool.acquire() as c:
+        return await budget.history(c, max(3, min(months, 24)))
+
+
+@app.get("/api/budget/recurring")
+async def budget_recurring():
+    async with pool.acquire() as c:
+        return await budget.recurring(c)
+
+
 @app.get("/api/budget/unsorted")
 async def budget_unsorted():
     async with pool.acquire() as c:

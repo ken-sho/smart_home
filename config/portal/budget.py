@@ -19,7 +19,7 @@ parse_ozon_pdf(path) → шапка справки + операции. Пров�
 self и credit в бюджет не входят (excluded): это перемещение денег, а не трата.
 """
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 
 EXCLUDED_KINDS = ("self", "credit")
@@ -349,6 +349,54 @@ async def month_summary(c, month: str) -> dict:
             "splits": [{"category_id": s["category_id"], "amount": float(s["amount"])} for s in splits.get(o["id"], [])],
         } for o in ops],
     }
+
+
+async def history(c, months: int = 12) -> dict:
+    """Траты по месяцам и категориям за последние N месяцев с данными.
+    partial = месяц не покрыт справками целиком (начало/конец периода внутри месяца)."""
+    first = await c.fetchval("SELECT min(op_at) FROM budget.ops")
+    if not first:
+        return {"months": []}
+    today = datetime.now()
+    cur = (today.year, today.month)
+    keys, (y, m) = [], (first.year, first.month)
+    while (y, m) <= cur:
+        keys.append(f"{y}-{m:02d}")
+        y, m = (y + 1, 1) if m == 12 else (y, m + 1)
+    keys = keys[-months:]
+    periods = await c.fetch("SELECT period_from, period_to FROM budget.statements")
+    out = []
+    for k in keys:
+        s = await month_summary(c, k)
+        start, end = _month_bounds(k)
+        need_to = min(end.date(), today.date()) - timedelta(days=1)
+        covered = any(p["period_from"] <= start.date() and p["period_to"] >= need_to for p in periods)
+        out.append({
+            "month": k,
+            "expense": s["expense"],
+            "income": s["income"],
+            "by_cat": {str(ct["id"]): -ct["total"] for ct in s["categories"] if ct["kind"] == "expense" and ct["total"]},
+            "partial": not covered or k == f"{cur[0]}-{cur[1]:02d}",
+        })
+    return {"months": out}
+
+
+async def recurring(c) -> list[dict]:
+    """Регулярные платежи: один контрагент в ≥3 разных месяцах с похожей суммой
+    (разброс ≤ 20% от средней). Ozon и переводы между своими счетами не в счёт."""
+    rows = await c.fetch(
+        "SELECT o.counterparty, count(DISTINCT date_trunc('month', o.op_at)) AS months, count(*) AS n, "
+        "       avg(-o.amount) AS avg, stddev_pop(-o.amount) AS sd, max(o.op_at) AS last_at, "
+        "       min(ct.name) AS category "
+        "FROM budget.ops o LEFT JOIN budget.categories ct ON ct.id = o.category_id "
+        "WHERE o.amount < 0 AND o.kind NOT IN ('self', 'credit', 'ozon') "
+        "GROUP BY o.counterparty "
+        "HAVING count(DISTINCT date_trunc('month', o.op_at)) >= 3 "
+        "   AND stddev_pop(-o.amount) <= 0.2 * avg(-o.amount) "
+        "ORDER BY avg(-o.amount) * count(*) DESC")
+    return [{"counterparty": r["counterparty"], "months": r["months"], "n": r["n"],
+             "avg": float(r["avg"]), "per_month": float(r["avg"]) * r["n"] / r["months"],
+             "last_at": r["last_at"].isoformat(), "category": r["category"]} for r in rows]
 
 
 async def unsorted(c) -> list[dict]:

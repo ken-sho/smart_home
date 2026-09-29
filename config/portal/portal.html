@@ -665,6 +665,27 @@ input[type=number]:focus { border-color: var(--accent); }
 .bud-op:hover { background: var(--surface2); }
 .bud-op-t { color: var(--text3); font-family: var(--mono); font-size: 10px; }
 .bud-op-note { font-size: 10.5px; color: var(--text3); font-style: italic; padding: 0 0 3px 44px; }
+.bud-chart-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 8px 10px; margin-bottom: 8px; }
+.bud-chart-chips { display: flex; gap: 4px; overflow-x: auto; padding-bottom: 4px; scrollbar-width: none; }
+.bud-chart-chips::-webkit-scrollbar { display: none; }
+.bud-chart-chips .cc-chip { white-space: nowrap; flex-shrink: 0; }
+.bud-chart { position: relative; margin-top: 4px; }
+.bud-chart svg { width: 100%; height: auto; display: block; overflow: visible; }
+.bud-chart text { font-family: var(--mono); font-size: 9px; fill: var(--text3); }
+.bud-chart text.on { fill: var(--text2); }
+.bud-chart rect.hit { cursor: pointer; }
+.bud-tip { display: none; position: absolute; top: -4px; z-index: 3; pointer-events: none; white-space: nowrap;
+  background: var(--surface3); border: 1px solid var(--border2); border-radius: var(--radius-sm); padding: 4px 8px; font-size: 11px; }
+.bud-chart-note { font-size: 10px; color: var(--text3); line-height: 1.45; margin-top: 4px; }
+#panel-finance.amounts-hidden .bud-chart text.v { filter: blur(4px); }
+.bud-delta { font-size: 10px; font-family: var(--mono); }
+.bud-avg { color: var(--text2); }
+.bud-avg .credit-amount { font-size: 10px; min-width: 0; font-weight: 600; }
+.bud-rec .bud-cat-name i { color: var(--text3); }
+.bud-rec-row { display: flex; gap: 8px; align-items: center; padding: 4px 0; }
+.bud-rec-main { flex: 1; min-width: 0; }
+.bud-rec-name { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bud-rec-meta { font-size: 10px; color: var(--text3); }
 .bud-banner { background: var(--accent-bg); border: 1px solid transparent; border-radius: var(--radius); padding: 8px 10px; margin-bottom: 8px; }
 .bud-banner.err { background: var(--red-bg); border-color: var(--red-border); }
 .bud-banner-top { display: flex; gap: 8px; align-items: flex-start; font-size: 12px; line-height: 1.45; color: var(--accent-text); }
@@ -3801,12 +3822,20 @@ function renderFinance() {
 // ── режим «Траты»: операции из справки Ozon Банка по категориям ──
 state.budget = null;           // { month, income, expense, excluded, categories, ops }
 state.budgetUnsorted = [];     // очередь «Разобрать»
+state.budgetHistory = [];      // траты по месяцам (график динамики)
+state.budgetRecurring = [];    // регулярные платежи
 let budgetOpenCat = null;      // раскрытая категория (id)
 async function loadBudget(month, quiet) {
   if (!financeOnline || month > financeCurrentMonth) return;
   try {
-    const [b, u] = await Promise.all([apiFetch('/budget/month/' + month), apiFetch('/budget/unsorted').catch(() => [])]);
+    const [b, u, h, rc] = await Promise.all([
+      apiFetch('/budget/month/' + month),
+      apiFetch('/budget/unsorted').catch(() => []),
+      apiFetch('/budget/history?months=12').catch(() => ({ months: [] })),
+      apiFetch('/budget/recurring').catch(() => []),
+    ]);
     state.budget = b; state.budgetUnsorted = u || [];
+    state.budgetHistory = (h && h.months) || []; state.budgetRecurring = rc || [];
     state.currentMonth = month;
   } catch (e) { state.budget = null; }
   if (quiet) return;
@@ -3819,6 +3848,102 @@ async function loadBudget(month, quiet) {
 function fmtRub(n) { return (n < 0 ? '−' : '') + Math.round(Math.abs(n)).toLocaleString('ru-RU') + ' ₽'; }
 function budCat(id) { return (state.budget && state.budget.categories || []).find(c => c.id === id); }
 const OZON_ORDER_URL = 'https://www.ozon.ru/my/orderdetails/?order=';
+
+// ── динамика трат по месяцам (SVG-столбики) ──
+// Один ряд: «Все» или выбранная категория. Пунктир — среднее по ПОЛНЫМ месяцам;
+// неполные месяцы (справка начинается/кончается внутри, текущий) — бледные.
+let budgetChartCat = (() => { try { return localStorage.getItem('bud_chart_cat') || 'all'; } catch (e) { return 'all'; } })();
+let budgetRecOpen = false;
+function fmtK(n) { return n >= 1e6 ? (n / 1e6).toFixed(1).replace('.', ',') + ' млн' : Math.round(n / 1000) + ' тыс'; }
+
+function budgetChartData() {
+  const hist = state.budgetHistory || [];
+  const tot = {};
+  hist.forEach(m => Object.entries(m.by_cat).forEach(([k, v]) => { tot[k] = (tot[k] || 0) + v; }));
+  const top = Object.entries(tot).sort((a, b) => b[1] - a[1]).map(([k]) => k).filter(k => budCat(+k)).slice(0, 7);
+  if (budgetChartCat !== 'all' && !budCat(+budgetChartCat)) budgetChartCat = 'all';
+  if (budgetChartCat !== 'all' && !top.includes(budgetChartCat)) top.push(budgetChartCat);
+  const vals = hist.map(m => budgetChartCat === 'all' ? m.expense : (m.by_cat[budgetChartCat] || 0));
+  const full = hist.map((m, i) => m.partial ? null : vals[i]).filter(v => v != null);
+  const avg = full.length ? full.reduce((a, b) => a + b, 0) / full.length : null;
+  return { hist, top, vals, avg };
+}
+
+function budgetChartHtml() {
+  const { hist, top, vals, avg } = budgetChartData();
+  if (hist.length < 2) return '';
+  const W = 320, H = 136, T = 14, B = 16, L = 2, R = 2, pw = W - L - R, ph = H - T - B;
+  const max = Math.max(...vals, avg || 0) * 1.12 || 1;
+  const bw = pw / hist.length, barW = Math.min(26, bw * 0.62);
+  const y = v => T + ph * (1 - v / max);
+  const sel = state.budget.month;
+  let bars = '', hits = '';
+  hist.forEach((m, i) => {
+    const v = vals[i], x = L + i * bw + (bw - barW) / 2, yy = y(v), h = Math.max(v > 0 ? 1.5 : 0, T + ph - yy);
+    const on = m.month === sel;
+    bars += `<rect x="${x.toFixed(1)}" y="${(T + ph - h).toFixed(1)}" width="${barW.toFixed(1)}" height="${h.toFixed(1)}" rx="3"
+      fill="var(--accent)" fill-opacity="${m.partial ? (on ? 0.45 : 0.18) : (on ? 1 : 0.5)}"
+      ${m.partial ? 'stroke="var(--accent)" stroke-opacity=".6" stroke-dasharray="2 2" stroke-width="1"' : ''}/>`;
+    bars += `<text x="${(L + i * bw + bw / 2).toFixed(1)}" y="${H - 4}" text-anchor="middle" class="lbl${on ? ' on' : ''}">${MONTHS_RU[+m.month.slice(5, 7) - 1].slice(0, 3).toLowerCase()}</text>`;
+    if (on && v > 0) bars += `<text x="${(L + i * bw + bw / 2).toFixed(1)}" y="${(T + ph - h - 3).toFixed(1)}" text-anchor="middle" class="v on">${fmtK(v)}</text>`;
+    hits += `<rect class="hit" data-i="${i}" x="${(L + i * bw).toFixed(1)}" y="0" width="${bw.toFixed(1)}" height="${H}" fill="transparent"/>`;
+  });
+  // подпись среднего — под графиком: внутри она спорит с подписью столбика
+  const avgLine = avg ? `<line x1="${L}" x2="${W - R}" y1="${y(avg).toFixed(1)}" y2="${y(avg).toFixed(1)}" stroke="var(--text3)" stroke-dasharray="3 3" stroke-width="1"/>` : '';
+  const chips = [['all', 'Все']].concat(top.map(k => [k, budCat(+k).name]))
+    .map(([k, n]) => `<button class="cc-chip${k === budgetChartCat ? ' active' : ''}" data-cat="${k}">${escapeHtml(n)}</button>`).join('');
+  return `<div class="bud-chart-card">
+      <div class="bud-chart-chips">${chips}</div>
+      <div class="bud-chart" id="budChart">
+        <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Траты по месяцам">${avgLine}${bars}${hits}</svg>
+        <div class="bud-tip" id="budTip"></div>
+      </div>
+      <div class="bud-chart-note">${avg ? `<span class="bud-avg">- - среднее <span class="credit-amount">${fmtK(avg)}</span>/мес</span> по полным месяцам. ` : ''}Бледные столбики — месяц загружен не целиком. Нажмите на столбик — открыть месяц.</div>
+    </div>`;
+}
+
+function bindBudgetChart() {
+  document.querySelectorAll('.bud-chart-chips .cc-chip').forEach(b => b.onclick = () => {
+    budgetChartCat = b.dataset.cat;
+    try { localStorage.setItem('bud_chart_cat', budgetChartCat); } catch (e) {}
+    renderBudget();
+  });
+  const box = document.getElementById('budChart'), tip = document.getElementById('budTip');
+  if (!box) return;
+  const { hist, vals } = budgetChartData();
+  box.querySelectorAll('rect.hit').forEach(r => {
+    const i = +r.dataset.i, m = hist[i];
+    r.onmouseenter = () => {
+      tip.innerHTML = `<b>${MONTHS_RU[+m.month.slice(5, 7) - 1]} ${m.month.slice(0, 4)}</b> · <span class="credit-amount">${fmtRub(vals[i])}</span>${m.partial ? '<br><span style="color:var(--text3)">месяц загружен не целиком</span>' : ''}`;
+      tip.style.display = 'block';
+      const bx = box.getBoundingClientRect(), rx = r.getBoundingClientRect();
+      tip.style.left = Math.max(0, Math.min(bx.width - tip.offsetWidth, rx.left - bx.left + rx.width / 2 - tip.offsetWidth / 2)) + 'px';
+    };
+    r.onmouseleave = () => { tip.style.display = 'none'; };
+    r.onclick = () => { if (m.month !== state.currentMonth) loadBudget(m.month); };
+  });
+}
+
+function budgetRecurringHtml() {
+  const rec = state.budgetRecurring || [];
+  if (!rec.length) return '';
+  const sum = rec.reduce((s, x) => s + x.per_month, 0);
+  const rows = budgetRecOpen ? rec.map(x => `
+      <div class="bud-rec-row">
+        <div class="bud-rec-main"><div class="bud-rec-name">${escapeHtml(x.counterparty)}</div>
+          <div class="bud-rec-meta">${escapeHtml(x.category || '—')} · ${x.months} мес. · последний ${x.last_at.slice(8, 10)}.${x.last_at.slice(5, 7)}</div></div>
+        <span class="credit-amount">≈ ${fmtRub(x.per_month)}/мес</span>
+      </div>`).join('') : '';
+  return `<div class="bud-cat bud-rec">
+      <div class="bud-cat-top" id="budRecHead">
+        <span class="bud-cat-name"><i class="ti ti-repeat"></i> Регулярные платежи</span>
+        <span class="bud-cat-n">${rec.length}</span>
+        <span class="credit-amount">≈ ${fmtRub(sum)}/мес</span>
+        <i class="ti ti-chevron-${budgetRecOpen ? 'up' : 'down'}" style="color:var(--text3)"></i>
+      </div>
+      ${rows ? `<div class="bud-ops">${rows}</div>` : ''}
+    </div>`;
+}
 
 // строки категории: разбитая операция попадает в каждую категорию своей частью
 function budCatItems(cid) {
@@ -3857,20 +3982,38 @@ function renderBudget() {
       <div><div class="fin-stat-val red credit-amount">${fmtRub(b.expense)}</div><div class="fin-stat-label">траты</div></div>
       <div><div class="fin-stat-val credit-amount ${rest >= 0 ? 'green' : 'red'}">${fmtRub(rest)}</div><div class="fin-stat-label">остаток</div></div>
     </div>
-    <div class="svc-section-label">Траты по категориям</div>
+    ${budgetChartHtml()}
+    <div class="svc-section-label">Траты по категориям <span style="text-transform:none;letter-spacing:0">· к прошлому месяцу</span></div>
     <div id="budExp"></div>
     ${inc.length ? '<div class="svc-section-label">Доходы</div><div id="budInc"></div>' : ''}
+    ${budgetRecurringHtml()}
     <div class="bud-note">Переводы между своими счетами и погашение кредитов в траты не входят. Нажмите на операцию — сменить категорию, добавить заметку или разбить.</div>`;
   const sb = document.getElementById('budSortBtn'); if (sb) sb.onclick = openBudgetSort;
   bindBudgetBanner();
+  bindBudgetChart();
+  const rh = document.getElementById('budRecHead');
+  if (rh) rh.onclick = () => { budgetRecOpen = !budgetRecOpen; renderBudget(); };
+  // изменение к прошлому месяцу (если он есть в истории и покрыт справкой целиком)
+  const hist = state.budgetHistory || [];
+  const hi = hist.findIndex(x => x.month === b.month);
+  const prev = hi > 0 && !hist[hi - 1].partial ? hist[hi - 1] : null;
   const put = (box, c, max) => {
     const row = document.createElement('div');
     const open = budgetOpenCat === c.id;
     row.className = 'bud-cat' + (open ? ' open' : '');
     const items = budCatItems(c.id);
+    let delta = '';
+    if (prev && c.kind === 'expense') {
+      const was = prev.by_cat[String(c.id)] || 0, now = -c.total;
+      if (was > 0) {
+        const pct = (now / was - 1) * 100;
+        if (Math.abs(pct) >= 1) delta = `<span class="bud-delta ${pct > 0 ? 'c-down' : 'c-up'}">${pct > 0 ? '↑' : '↓'}${Math.abs(pct).toFixed(0)}%</span>`;
+      } else if (now > 0) delta = '<span class="bud-delta" style="color:var(--text3)">новое</span>';
+    }
     row.innerHTML = `
       <div class="bud-cat-top">
         <span class="bud-cat-name">${escapeHtml(c.name)}</span>
+        ${delta}
         <span class="bud-cat-n">${items.length}</span>
         <span class="credit-amount">${fmtRub(Math.abs(c.total))}</span>
       </div>
