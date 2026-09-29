@@ -665,6 +665,15 @@ input[type=number]:focus { border-color: var(--accent); }
 .bud-op:hover { background: var(--surface2); }
 .bud-op-t { color: var(--text3); font-family: var(--mono); font-size: 10px; }
 .bud-op-note { font-size: 10.5px; color: var(--text3); font-style: italic; padding: 0 0 3px 44px; }
+.bud-banner { background: var(--accent-bg); border: 1px solid transparent; border-radius: var(--radius); padding: 8px 10px; margin-bottom: 8px; }
+.bud-banner.err { background: var(--red-bg); border-color: var(--red-border); }
+.bud-banner-top { display: flex; gap: 8px; align-items: flex-start; font-size: 12px; line-height: 1.45; color: var(--accent-text); }
+.bud-banner.err .bud-banner-top { color: var(--red); }
+.bud-banner-top span { flex: 1; }
+.bud-banner-top > i { font-size: 16px; margin-top: 1px; }
+.bud-banner-months { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; padding-left: 24px; }
+#budgetImportBtn.spinning i { animation: crypto-spin .8s linear infinite; display: inline-block; }
+#budgetImportBtn.spinning { pointer-events: none; opacity: .7; }
 .bud-sort-btn { width: 100%; margin-bottom: 8px; display: flex; align-items: center; justify-content: center; gap: 6px; }
 #budgetOpModal .modal, #budgetSortModal .modal { width: 310px; max-height: 90vh; overflow-y: auto; }
 .bud-desc { font-size: 10.5px; color: var(--text3); line-height: 1.45; word-break: break-word; }
@@ -3831,8 +3840,9 @@ function renderBudget() {
   const nSort = state.budgetUnsorted.length;
   const sortBtn = nSort ? `<button class="btn-ghost bud-sort-btn" id="budSortBtn"><i class="ti ti-list-check"></i> Разобрать · ${nSort}</button>` : '';
   if (!b.ops.length) {
-    el.innerHTML = sortBtn + `<div class="empty">Операций за месяц нет.<br>Загрузите справку Ozon Банка — кнопка <i class="ti ti-file-upload"></i> справа от месяца.<br><span style="color:var(--text3)">Повторная загрузка дублей не создаёт.</span></div>`;
+    el.innerHTML = budgetImportBanner() + sortBtn + `<div class="empty">Операций за месяц нет.<br>Загрузите справку Ozon Банка — кнопка <i class="ti ti-file-upload"></i> справа от месяца.<br><span style="color:var(--text3)">Повторная загрузка дублей не создаёт.</span></div>`;
     const sb = document.getElementById('budSortBtn'); if (sb) sb.onclick = openBudgetSort;
+    bindBudgetBanner();
     return;
   }
   const exp = b.categories.filter(c => c.kind === 'expense' && c.total < 0).sort((x, y) => x.total - y.total);
@@ -3840,6 +3850,7 @@ function renderBudget() {
   const maxExp = exp.length ? -exp[0].total : 1;
   const rest = b.income - b.expense;
   el.innerHTML = `
+    ${budgetImportBanner()}
     ${sortBtn}
     <div class="bud-sum">
       <div><div class="fin-stat-val green credit-amount">${fmtRub(b.income)}</div><div class="fin-stat-label">доход</div></div>
@@ -3851,6 +3862,7 @@ function renderBudget() {
     ${inc.length ? '<div class="svc-section-label">Доходы</div><div id="budInc"></div>' : ''}
     <div class="bud-note">Переводы между своими счетами и погашение кредитов в траты не входят. Нажмите на операцию — сменить категорию, добавить заметку или разбить.</div>`;
   const sb = document.getElementById('budSortBtn'); if (sb) sb.onclick = openBudgetSort;
+  bindBudgetBanner();
   const put = (box, c, max) => {
     const row = document.createElement('div');
     const open = budgetOpenCat === c.id;
@@ -4040,10 +4052,42 @@ document.getElementById('budSortClose').onclick = async () => {
   await loadBudget(state.currentMonth);
 };
 
+// результат последней загрузки — плашка вверху «Трат» (тост легко пропустить)
+state.budgetImport = null;     // { ok, text, months: ['YYYY-MM'] } | { ok:false, text }
+function budgetImportBanner() {
+  const r = state.budgetImport;
+  if (!r) return '';
+  const chips = (r.months || []).map(m =>
+    `<button class="cc-chip${m === state.currentMonth ? ' active' : ''}" data-month="${m}">${MONTHS_RU[+m.slice(5, 7) - 1].slice(0, 3)}${m.slice(0, 4) !== state.currentMonth.slice(0, 4) ? ' ' + m.slice(2, 4) : ''}</button>`).join('');
+  return `<div class="bud-banner ${r.ok ? '' : 'err'}">
+      <div class="bud-banner-top"><i class="ti ${r.ok ? 'ti-circle-check' : 'ti-alert-triangle'}"></i><span>${escapeHtml(r.text)}</span>
+        <button class="cc-btn" id="budBannerClose" title="Закрыть"><i class="ti ti-x"></i></button></div>
+      ${chips ? `<div class="bud-banner-months">${chips}</div>` : ''}
+    </div>`;
+}
+function bindBudgetBanner() {
+  const x = document.getElementById('budBannerClose');
+  if (x) x.onclick = () => { state.budgetImport = null; renderBudget(); };
+  document.querySelectorAll('.bud-banner .cc-chip').forEach(b => b.onclick = () => loadBudget(b.dataset.month));
+}
+function monthsBetween(from, to) {
+  const out = [];
+  let y = +from.slice(0, 4), m = +from.slice(5, 7);
+  const last = to.slice(0, 7) > financeCurrentMonth ? financeCurrentMonth : to.slice(0, 7);
+  while (true) {
+    const k = y + '-' + String(m).padStart(2, '0');
+    if (k > last) break;
+    out.push(k);
+    if (++m > 12) { m = 1; y++; }
+  }
+  return out;
+}
+
 async function budgetUpload(file) {
   const btn = document.getElementById('budgetImportBtn');
-  btn.classList.add('disabled');
-  todoToast('Разбираю справку…');
+  if (btn.classList.contains('spinning')) return;
+  btn.classList.add('spinning');
+  btn.querySelector('i').className = 'ti ti-loader-2';
   try {
     const fd = new FormData();
     fd.append('file', file);
@@ -4052,13 +4096,19 @@ async function budgetUpload(file) {
     const r = await fetch(API + '/budget/import', { method: 'POST', headers, body: fd });
     const d = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(d.detail || ('Ошибка ' + r.status));
-    const p = s => s.slice(8, 10) + '.' + s.slice(5, 7);
-    todoToast(`Справка ${p(d.period_from)}–${p(d.period_to)}: новых ${d.new}, дублей ${d.dup}`);
-    await loadBudget(state.currentMonth);
+    const p = s => s.slice(8, 10) + '.' + s.slice(5, 7) + '.' + s.slice(2, 4);
+    const months = monthsBetween(d.period_from, d.period_to);
+    state.budgetImport = {
+      ok: true, months,
+      text: `Справка ${p(d.period_from)}–${p(d.period_to)}: новых ${d.new}, дублей ${d.dup}.`
+        + (months.length > 1 ? ' Операции разложены по месяцам:' : ''),
+    };
   } catch (e) {
-    todoToast(e.message);
+    state.budgetImport = { ok: false, text: 'Справка не загружена: ' + e.message };
   }
-  btn.classList.remove('disabled');
+  btn.classList.remove('spinning');
+  btn.querySelector('i').className = 'ti ti-file-upload';
+  await loadBudget(state.currentMonth);
 }
 document.getElementById('budgetImportBtn').onclick = () => document.getElementById('budgetFile').click();
 document.getElementById('budgetFile').onchange = (e) => {
