@@ -1,3 +1,5 @@
 *.env
 secrets.yaml
 .env*
+__pycache__/
+*.pyc
