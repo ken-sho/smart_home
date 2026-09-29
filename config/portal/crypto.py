@@ -1,8 +1,16 @@
-"""Модуль «Крипто»: сбор цен GRAM/TRX из CoinGecko в crypto.prices.
+"""Модуль «Крипто»: сбор цен GRAM/TRX из CoinGecko и расчёт портфеля.
 
 Джоба crypto_tick вызывается планировщиком раз в час. Если истории по
 монете ещё нет — сначала догружает год дневных точек и 90 дней почасовых
 (бесплатный CoinGecko на отрезке 2–90 дней отдаёт почасовую гранулярность).
+
+Портфель (position_from_trades) — метод средней стоимости:
+  buy       qty += q, cost += total
+  earn      qty += q, earn_qty += q          (бесплатные монеты, cost не растёт)
+  sell      доля f = q/qty списывает f от cost и earn_qty; realized += total − f·cost
+  writeoff  как sell с total = 0
+  entry = cost / (qty − earn_qty) — средняя цена ПОКУПКИ, начисления Earn её не портят;
+  P&L   = qty·price − cost — уже включает доход от Earn.
 """
 import json
 import asyncio
@@ -36,6 +44,81 @@ async def _store(pool, symbol: str, data: dict) -> int:
             rows,
         )
     return len(rows)
+
+
+def position_from_trades(trades) -> dict:
+    """trades — в хронологическом порядке, поля side/qty/total (числа)."""
+    qty = cost = earn_qty = realized = 0.0
+    for t in trades:
+        q, total = float(t["qty"]), float(t["total"])
+        if t["side"] == "buy":
+            qty += q
+            cost += total
+        elif t["side"] == "earn":
+            qty += q
+            earn_qty += q
+        elif qty > 0:   # sell / writeoff
+            f = min(q / qty, 1.0)
+            realized += (total if t["side"] == "sell" else 0.0) - f * cost
+            cost -= f * cost
+            earn_qty -= f * earn_qty
+            qty = max(qty - q, 0.0)
+    bought = qty - earn_qty
+    return {
+        "qty": qty,
+        "cost": cost,
+        "earn_qty": earn_qty,
+        "realized": realized,
+        "entry": cost / bought if bought > 1e-9 else None,
+    }
+
+
+async def portfolio(c) -> dict:
+    """Снимок портфеля: монеты с позицией и ценой + баланс USDT."""
+    assets = await c.fetch("SELECT * FROM crypto.assets ORDER BY position")
+    trades = await c.fetch(
+        "SELECT symbol, side, qty, total FROM crypto.trades ORDER BY date, created_at"
+    )
+    prices = await c.fetch(
+        """WITH last AS (
+               SELECT DISTINCT ON (symbol) symbol, ts, price
+                 FROM crypto.prices ORDER BY symbol, ts DESC)
+           SELECT l.*,
+                  (SELECT p.price FROM crypto.prices p
+                    WHERE p.symbol = l.symbol AND p.ts <= l.ts - interval '24 hours'
+                    ORDER BY p.ts DESC LIMIT 1) AS price_24h
+             FROM last l"""
+    )
+    usdt = float(await c.fetchval("SELECT COALESCE(sum(amount), 0) FROM crypto.cash"))
+    last = {r["symbol"]: r for r in prices}
+    coins = []
+    for a in assets:
+        sym = a["symbol"]
+        if sym == "USDT":
+            price, price_24h, ts = 1.0, None, None
+            pos = {"qty": usdt, "cost": usdt, "earn_qty": 0.0, "realized": 0.0, "entry": None}
+        else:
+            p = last.get(sym)
+            price = float(p["price"]) if p else None
+            price_24h = float(p["price_24h"]) if p and p["price_24h"] is not None else None
+            ts = p["ts"].isoformat() if p else None
+            pos = position_from_trades([t for t in trades if t["symbol"] == sym])
+        value = pos["qty"] * price if price is not None else None
+        coins.append({
+            "symbol": sym,
+            "name": a["name"],
+            "earn_apr": float(a["earn_apr"]),
+            "inflation": float(a["inflation"]),
+            "core_qty": float(a["core_qty"]),
+            "fee_pct": float(a["fee_pct"]),
+            "price": price,
+            "price_ts": ts,
+            "change_24h": (price / price_24h - 1) * 100 if price and price_24h else None,
+            "value": value,
+            "pnl": value - pos["cost"] if value is not None and sym != "USDT" else None,
+            **pos,
+        })
+    return {"coins": coins, "usdt": usdt}
 
 
 async def crypto_tick(pool):

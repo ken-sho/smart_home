@@ -10,6 +10,14 @@
 --              для старой истории — дневные). Свечи и индикаторы
 --              считаются из них в crypto.py.
 --
+--  Этап 1: портфель.
+--    trades  — журнал по монетам: покупка / продажа / начисление Earn
+--              (сверка «+») / списание (сверка «−»). Позиция, средний
+--              вход и P&L считаются из журнала в crypto.py.
+--    cash    — движения USDT (подписанная сумма): стартовый остаток,
+--              зарплата, вывод в фиат, сделка, сверка. Строки сделок
+--              создаются вместе со сделкой и удаляются каскадом.
+--
 --  Идемпотентно: накатывается при каждом старте бэкенда.
 -- ════════════════════════════════════════════════════════════
 
@@ -50,6 +58,42 @@ CREATE TABLE IF NOT EXISTS crypto.prices (
     PRIMARY KEY (symbol, ts)
 );
 
+-- ── Журнал сделок по монетам ──────────────────────────────────
+--   side:  buy / sell       — сделка в Wallet (total = USDT списано/получено,
+--                             price = total / qty, спред уже внутри)
+--          earn / writeoff  — сверка с кошельком: начисление Earn (+) или
+--                             расхождение (−); USDT не двигают, цена 0
+--   external = true — покупка вне кассы (куплено давно): USDT не списывается
+CREATE TABLE IF NOT EXISTS crypto.trades (
+    id          uuid          PRIMARY KEY DEFAULT gen_random_uuid(),
+    symbol      text          NOT NULL REFERENCES crypto.assets(symbol),
+    side        text          NOT NULL CHECK (side IN ('buy', 'sell', 'earn', 'writeoff')),
+    qty         numeric(20,8) NOT NULL CHECK (qty > 0),
+    price       numeric(20,8) NOT NULL DEFAULT 0 CHECK (price >= 0),
+    total       numeric(14,2) NOT NULL DEFAULT 0 CHECK (total >= 0),
+    external    boolean       NOT NULL DEFAULT false,
+    date        date          NOT NULL DEFAULT current_date,
+    reason      text          NOT NULL DEFAULT '',
+    created_at  timestamptz   NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_trades_symbol ON crypto.trades (symbol, date, created_at);
+
+-- ── Касса USDT ────────────────────────────────────────────────
+--   amount > 0 — приход, < 0 — расход
+CREATE TABLE IF NOT EXISTS crypto.cash (
+    id          uuid          PRIMARY KEY DEFAULT gen_random_uuid(),
+    kind        text          NOT NULL
+                              CHECK (kind IN ('deposit', 'salary', 'fiat_out', 'trade', 'reconcile')),
+    amount      numeric(14,2) NOT NULL CHECK (amount <> 0),
+    trade_id    uuid          REFERENCES crypto.trades(id) ON DELETE CASCADE,
+    date        date          NOT NULL DEFAULT current_date,
+    note        text          NOT NULL DEFAULT '',
+    created_at  timestamptz   NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_cash_date ON crypto.cash (date, created_at);
+
 -- ── updated_at автоматика ─────────────────────────────────────
 CREATE OR REPLACE FUNCTION crypto.trg_touch()
 RETURNS trigger LANGUAGE plpgsql AS $$
@@ -69,4 +113,6 @@ CREATE OR REPLACE TRIGGER assets_touch
 ALTER SCHEMA   crypto                 OWNER TO portal;
 ALTER TABLE    crypto.assets          OWNER TO portal;
 ALTER TABLE    crypto.prices          OWNER TO portal;
+ALTER TABLE    crypto.trades          OWNER TO portal;
+ALTER TABLE    crypto.cash            OWNER TO portal;
 ALTER FUNCTION crypto.trg_touch()     OWNER TO portal;

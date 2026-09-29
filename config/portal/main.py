@@ -1597,6 +1597,203 @@ async def delete_service(service_id: uuid.UUID):
 
 
 # ══════════════════════════════════════════════════════════════
+#  CRYPTO API (схема crypto: assets · prices · trades · cash)
+#  Портфель GRAM/TRX + касса USDT. Расчёты — в crypto.py.
+# ══════════════════════════════════════════════════════════════
+class CryptoTradeIn(BaseModel):
+    symbol: str
+    side: str                  # 'buy' | 'sell'
+    qty: float
+    total: float               # USDT списано (buy) / получено (sell)
+    date: Date | None = None
+    reason: str = ""
+    external: bool = False     # покупка вне кассы — USDT не списываем
+
+
+class CryptoCashIn(BaseModel):
+    kind: str                  # 'deposit' | 'salary' | 'fiat_out'
+    amount: float              # всегда > 0, знак — по kind
+    date: Date | None = None
+    note: str = ""
+
+
+class CryptoReconcileIn(BaseModel):
+    symbol: str
+    qty: float                 # фактический остаток в Wallet
+
+
+class CryptoAssetPatch(BaseModel):
+    earn_apr: float | None = None
+    core_qty: float | None = None
+    fee_pct: float | None = None
+
+
+def to_crypto_trade(r) -> dict:
+    return {
+        "id": str(r["id"]),
+        "symbol": r["symbol"],
+        "side": r["side"],
+        "qty": float(r["qty"]),
+        "price": float(r["price"]),
+        "total": float(r["total"]),
+        "external": r["external"],
+        "date": r["date"].isoformat(),
+        "reason": r["reason"],
+        "created_at": r["created_at"].isoformat(),
+    }
+
+
+def to_crypto_cash(r) -> dict:
+    return {
+        "id": str(r["id"]),
+        "kind": r["kind"],
+        "amount": float(r["amount"]),
+        "trade_id": str(r["trade_id"]) if r["trade_id"] else None,
+        "date": r["date"].isoformat(),
+        "note": r["note"],
+        "created_at": r["created_at"].isoformat(),
+    }
+
+
+async def _crypto_coin(c, symbol: str) -> dict:
+    snap = await crypto.portfolio(c)
+    coin = next((x for x in snap["coins"] if x["symbol"] == symbol), None)
+    if not coin:
+        raise HTTPException(404, "Монета не найдена")
+    return {**coin, "usdt": snap["usdt"]}
+
+
+@app.get("/api/crypto/bootstrap")
+async def crypto_bootstrap():
+    async with pool.acquire() as c:
+        snap = await crypto.portfolio(c)
+        trades = await c.fetch("SELECT * FROM crypto.trades ORDER BY date DESC, created_at DESC")
+        cash = await c.fetch("SELECT * FROM crypto.cash ORDER BY date DESC, created_at DESC")
+    return {
+        **snap,
+        "trades": [to_crypto_trade(t) for t in trades],
+        "cash": [to_crypto_cash(x) for x in cash],
+    }
+
+
+@app.post("/api/crypto/trades", status_code=201)
+async def create_crypto_trade(t: CryptoTradeIn):
+    if t.side not in ("buy", "sell"):
+        raise HTTPException(400, "Сделка: только покупка или продажа")
+    if t.qty <= 0 or t.total < 0:
+        raise HTTPException(400, "Количество должно быть > 0, сумма ≥ 0")
+    if t.symbol == "USDT":
+        raise HTTPException(400, "USDT — это касса, а не монета для сделок")
+    external = t.external and t.side == "buy"
+    async with pool.acquire() as c:
+        async with c.transaction():
+            coin = await _crypto_coin(c, t.symbol)
+            if t.side == "sell" and t.qty > coin["qty"] + 1e-8:
+                raise HTTPException(409, f"Нельзя продать больше, чем есть ({coin['qty']:g} {t.symbol})")
+            if t.side == "buy" and not external and t.total > coin["usdt"] + 0.005:
+                raise HTTPException(409, f"Недостаточно USDT (свободно {coin['usdt']:.2f})")
+            r = await c.fetchrow(
+                "INSERT INTO crypto.trades (symbol, side, qty, price, total, external, date, reason) "
+                "VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7, current_date), $8) RETURNING *",
+                t.symbol, t.side, round(t.qty, 8), round(t.total / t.qty, 8), round(t.total, 2),
+                external, t.date, t.reason.strip(),
+            )
+            if not external and round(t.total, 2) > 0:
+                await c.execute(
+                    "INSERT INTO crypto.cash (kind, amount, trade_id, date, note) "
+                    "VALUES ('trade', $1, $2, $3, $4)",
+                    round(-t.total if t.side == "buy" else t.total, 2), r["id"], r["date"],
+                    ("Покупка " if t.side == "buy" else "Продажа ") + t.symbol,
+                )
+    return to_crypto_trade(r)
+
+
+@app.delete("/api/crypto/trades/{trade_id}", status_code=204)
+async def delete_crypto_trade(trade_id: uuid.UUID):
+    # строка кассы по сделке удаляется каскадом
+    async with pool.acquire() as c:
+        res = await c.execute("DELETE FROM crypto.trades WHERE id = $1", trade_id)
+    if res.endswith(" 0"):
+        raise HTTPException(404, "Запись не найдена")
+
+
+@app.post("/api/crypto/cash", status_code=201)
+async def create_crypto_cash(x: CryptoCashIn):
+    if x.kind not in ("deposit", "salary", "fiat_out"):
+        raise HTTPException(400, "Неизвестный тип движения USDT")
+    if x.amount <= 0:
+        raise HTTPException(400, "Сумма должна быть > 0")
+    amount = round(-x.amount if x.kind == "fiat_out" else x.amount, 2)
+    async with pool.acquire() as c:
+        async with c.transaction():
+            if amount < 0:
+                usdt = float(await c.fetchval("SELECT COALESCE(sum(amount), 0) FROM crypto.cash"))
+                if -amount > usdt + 0.005:
+                    raise HTTPException(409, f"Недостаточно USDT (свободно {usdt:.2f})")
+            r = await c.fetchrow(
+                "INSERT INTO crypto.cash (kind, amount, date, note) "
+                "VALUES ($1, $2, COALESCE($3, current_date), $4) RETURNING *",
+                x.kind, amount, x.date, x.note.strip(),
+            )
+    return to_crypto_cash(r)
+
+
+@app.delete("/api/crypto/cash/{cash_id}", status_code=204)
+async def delete_crypto_cash(cash_id: uuid.UUID):
+    async with pool.acquire() as c:
+        trade_id = await c.fetchval("SELECT trade_id FROM crypto.cash WHERE id = $1", cash_id)
+        if trade_id:
+            raise HTTPException(409, "Это часть сделки — удалите саму сделку")
+        res = await c.execute("DELETE FROM crypto.cash WHERE id = $1", cash_id)
+    if res.endswith(" 0"):
+        raise HTTPException(404, "Запись не найдена")
+
+
+@app.post("/api/crypto/reconcile")
+async def crypto_reconcile(x: CryptoReconcileIn):
+    """Сверка с Wallet: разница с фактом → начисление Earn (+) или списание (−)."""
+    if x.qty < 0:
+        raise HTTPException(400, "Остаток не может быть отрицательным")
+    async with pool.acquire() as c:
+        async with c.transaction():
+            coin = await _crypto_coin(c, x.symbol)
+            if x.symbol == "USDT":
+                diff = round(x.qty - coin["usdt"], 2)
+                if diff != 0:
+                    await c.execute(
+                        "INSERT INTO crypto.cash (kind, amount, note) VALUES ('reconcile', $1, 'Сверка')",
+                        diff,
+                    )
+            else:
+                diff = round(x.qty - coin["qty"], 8)
+                if diff != 0:
+                    await c.execute(
+                        "INSERT INTO crypto.trades (symbol, side, qty, reason) VALUES ($1, $2, $3, 'Сверка')",
+                        x.symbol, "earn" if diff > 0 else "writeoff", abs(diff),
+                    )
+    return {"symbol": x.symbol, "diff": diff}
+
+
+@app.patch("/api/crypto/assets/{symbol}")
+async def update_crypto_asset(symbol: str, a: CryptoAssetPatch):
+    fields = {k: val for k, val in a.model_dump(exclude_unset=True).items() if val is not None}
+    if not fields:
+        raise HTTPException(400, "Нет полей для обновления")
+    if any(v < 0 for v in fields.values()):
+        raise HTTPException(400, "Значения не могут быть отрицательными")
+    cols = list(fields.keys())
+    set_clause = ", ".join(f"{col} = ${i + 2}" for i, col in enumerate(cols))
+    async with pool.acquire() as c:
+        r = await c.fetchrow(
+            f"UPDATE crypto.assets SET {set_clause} WHERE symbol = $1 RETURNING symbol",
+            symbol, *[fields[col] for col in cols],
+        )
+        if not r:
+            raise HTTPException(404, "Монета не найдена")
+        return await _crypto_coin(c, symbol)
+
+
+# ══════════════════════════════════════════════════════════════
 # ══════════════════════════════════════════════════════════════
 #  EVENTS API (схема evt: types · events)
 #  Оповещалка: типы (срок оповещения) → события. Год необязателен.
