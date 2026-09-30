@@ -632,7 +632,9 @@ input[type=number]:focus { border-color: var(--accent); }
 
 /* Приватный режим: суммы скрыты (блюр), пока не нажат «глаз».
    Сбрасывается при переключении вкладок — защита от случайного показа ЗП. */
-.credit-amount, .fin-stat-val, #fin-month-rem { transition: filter .14s ease; }
+.credit-amount, .fin-stat-val, #fin-month-rem, .fin-secret { transition: filter .14s ease; }
+.fin-secret { display: inline-block; }
+#panel-finance.amounts-hidden .fin-secret,
 #panel-finance.amounts-hidden .credit-amount,
 #panel-finance.amounts-hidden .fin-stat-val,
 #panel-finance.amounts-hidden #fin-month-rem {
@@ -4398,7 +4400,9 @@ function renderDK() {
 
     const main = document.createElement('div');
     main.className = 'credit-main';
-    main.innerHTML = `<div class="credit-name">${escapeHtml(en.name || '—')}</div>`;
+    // «USDT → ₽ ($200 · 79.54 ₽/$)» — сумма в скобках выдаёт заблюренный приход
+    const nameHtml = escapeHtml(en.name || '—').replace(/\(([^)]*\$[^)]*)\)$/, '<span class="fin-secret">($1)</span>');
+    main.innerHTML = `<div class="credit-name">${nameHtml}</div>`;
     main.title = 'Редактировать';
     main.onclick = () => openEntryForm(en);
 
