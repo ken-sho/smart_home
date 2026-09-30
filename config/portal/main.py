@@ -31,7 +31,7 @@ from contextlib import asynccontextmanager
 import asyncpg
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import FastAPI, HTTPException, Request, File, UploadFile
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -1504,7 +1504,8 @@ def _clean_items(items: list) -> tuple[list, float | None]:
             raise HTTPException(400, "Сумма подпункта не может быть отрицательной")
         if not name and cost is None:
             continue
-        out.append({"name": name, "cost": cost})
+        kind = it.get("kind") if it.get("kind") in ("work", "part") else None
+        out.append({"name": name, "cost": cost, "kind": kind})
         if cost is not None:
             total += cost
             has_cost = True
@@ -1530,7 +1531,12 @@ def to_vehicle(r) -> dict:
     }
 
 
+def _kind_sum(items: list, kind: str | None) -> float:
+    return round(sum(float(it.get("cost") or 0) for it in items if it.get("kind") == kind), 2)
+
+
 def to_service(r) -> dict:
+    items = r["items"] or []
     return {
         "id": str(r["id"]),
         "vehicle_id": str(r["vehicle_id"]),
@@ -1538,7 +1544,11 @@ def to_service(r) -> dict:
         "cost": float(r["cost"]) if r["cost"] is not None else None,
         "date": r["date"].isoformat() if r["date"] else None,
         "mileage": r["mileage"],
-        "items": r["items"] or [],
+        "items": items,
+        # подсуммы по типу подпункта: работы / запчасти / без типа (старые записи)
+        "cost_work": _kind_sum(items, "work"),
+        "cost_part": _kind_sum(items, "part"),
+        "cost_other": _kind_sum(items, None),
         "position": r["position"],
         "created_at": r["created_at"].isoformat(),
     }
@@ -1554,9 +1564,15 @@ async def garage_bootstrap():
         services = await c.fetch(
             "SELECT * FROM garage.services ORDER BY date DESC, created_at DESC"
         )
+        # только метаданные документов, без содержимого
+        files = await c.fetch(
+            "SELECT id, service_id, filename, mime, size, created_at "
+            "FROM garage.service_files ORDER BY created_at"
+        )
     return {
         "vehicles": [to_vehicle(v) for v in vehicles],
         "services": [to_service(s) for s in services],
+        "files": [to_service_file(f) for f in files],
     }
 
 
@@ -1660,6 +1676,68 @@ async def delete_service(service_id: uuid.UUID):
         res = await c.execute("DELETE FROM garage.services WHERE id = $1", service_id)
     if res.endswith("0"):
         raise HTTPException(404, "Запись не найдена")
+
+
+# ── документы записи (фото/сканы), хранятся в БД ──────────────
+GARAGE_FILE_MAX = 15 * 1024 * 1024
+GARAGE_FILE_SIGS = {                     # проверяем по содержимому, а не по имени
+    b"\xff\xd8\xff": "image/jpeg",
+    b"\x89PNG\r\n\x1a\n": "image/png",
+    b"%PDF": "application/pdf",
+}
+
+
+def to_service_file(r) -> dict:
+    return {
+        "id": str(r["id"]),
+        "service_id": str(r["service_id"]),
+        "filename": r["filename"],
+        "mime": r["mime"],
+        "size": r["size"],
+        "created_at": r["created_at"].isoformat(),
+    }
+
+
+@app.post("/api/garage/services/{service_id}/files", status_code=201)
+async def upload_service_file(service_id: uuid.UUID, file: UploadFile = File(...)):
+    raw = await file.read()
+    if len(raw) > GARAGE_FILE_MAX:
+        raise HTTPException(400, "Файл больше 15 МБ")
+    mime = next((m for sig, m in GARAGE_FILE_SIGS.items() if raw.startswith(sig)), None)
+    if not mime and raw[:4] == b"RIFF" and raw[8:12] == b"WEBP":
+        mime = "image/webp"
+    if not mime:
+        raise HTTPException(400, "Нужно фото (JPEG/PNG/WebP) или PDF")
+    async with pool.acquire() as c:
+        if not await c.fetchval("SELECT 1 FROM garage.services WHERE id = $1", service_id):
+            raise HTTPException(404, "Запись не найдена")
+        r = await c.fetchrow(
+            "INSERT INTO garage.service_files (service_id, filename, mime, size, data) "
+            "VALUES ($1, $2, $3, $4, $5) "
+            "RETURNING id, service_id, filename, mime, size, created_at",
+            service_id, (file.filename or "")[:200], mime, len(raw), raw,
+        )
+    return to_service_file(r)
+
+
+@app.get("/api/garage/files/{file_id}")
+async def get_service_file(file_id: uuid.UUID):
+    async with pool.acquire() as c:
+        r = await c.fetchrow(
+            "SELECT mime, data FROM garage.service_files WHERE id = $1", file_id
+        )
+    if not r:
+        raise HTTPException(404, "Файл не найден")
+    return Response(content=r["data"], media_type=r["mime"],
+                    headers={"Cache-Control": "private, max-age=86400"})
+
+
+@app.delete("/api/garage/files/{file_id}", status_code=204)
+async def delete_service_file(file_id: uuid.UUID):
+    async with pool.acquire() as c:
+        res = await c.execute("DELETE FROM garage.service_files WHERE id = $1", file_id)
+    if res.endswith("0"):
+        raise HTTPException(404, "Файл не найден")
 
 
 # ══════════════════════════════════════════════════════════════

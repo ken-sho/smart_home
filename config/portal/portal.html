@@ -1124,7 +1124,47 @@ input[type=number]:focus { border-color: var(--accent); }
   border-radius: var(--radius-sm); cursor: pointer; width: 32px; flex-shrink: 0;
 }
 .svc-item-row .sir-del:hover { color: var(--red); border-color: var(--red-border); }
+.svc-item-row .sir-kind {
+  background: var(--surface2); border: 1px solid var(--border2); color: var(--text3);
+  border-radius: var(--radius-sm); cursor: pointer; width: 32px; flex-shrink: 0; font-size: 14px;
+}
+.svc-item-row .sir-kind.work { color: var(--accent); }
+.svc-item-row .sir-kind.part { color: var(--yellow); }
+.svc-sub-group {
+  display: flex; justify-content: space-between; gap: 10px; margin: 6px 0 2px;
+  font-size: 10px; color: var(--text3); text-transform: uppercase; letter-spacing: .5px;
+}
+.svc-sub-group:first-child { margin-top: 0; }
+.svc-sub-group span { display: inline-flex; align-items: center; gap: 4px; }
+.svc-split { display: flex; flex-wrap: wrap; gap: 12px; margin: 8px 0 2px; font-size: 11px; color: var(--text3); font-family: var(--mono); }
+.svc-split span { display: inline-flex; align-items: center; gap: 3px; }
 .svc-total-label { font-size: 11px; color: var(--text3); }
+
+/* документы записи: миниатюры фото/сканов */
+.svc-files { display: flex; flex-wrap: wrap; gap: 6px; }
+.svc-files:empty { display: none; }
+.svc-sub .svc-files { margin-top: 8px; }
+.svc-file {
+  position: relative; width: 64px; height: 64px; flex-shrink: 0; padding: 0; overflow: hidden;
+  border: 1px solid var(--border2); border-radius: var(--radius-sm); background: var(--surface2);
+  cursor: pointer; display: flex; align-items: center; justify-content: center;
+  color: var(--text3); font-size: 22px;
+}
+.svc-file img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.svc-file.pending { border-style: dashed; border-color: var(--accent); }
+.svc-file .sf-del {
+  position: absolute; top: 2px; right: 2px; width: 18px; height: 18px; border-radius: 50%;
+  background: rgba(0,0,0,.65); color: #fff; font-size: 11px; display: flex; align-items: center; justify-content: center;
+}
+.svc-file-viewer {
+  position: fixed; inset: 0; z-index: 95; background: rgba(0,0,0,.92);
+  display: flex; align-items: center; justify-content: center; padding: 12px;
+}
+.svc-file-viewer img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.svc-file-viewer .sfv-close {
+  position: absolute; top: 12px; right: 12px; width: 36px; height: 36px; border-radius: 50%;
+  border: none; background: rgba(255,255,255,.15); color: #fff; font-size: 18px; cursor: pointer;
+}
 .svc-total { font-size: 13px; font-family: var(--mono); font-weight: 600; color: var(--accent); min-width: 90px; text-align: right; }
 
 /* архив */
@@ -2498,9 +2538,14 @@ input[type=number]:focus { border-color: var(--accent); }
       <div class="svc-items-edit" id="svcItemsList"></div>
       <div class="fin-form-row" style="align-items:center">
         <button class="btn-ghost" id="svcAddItemBtn"><i class="ti ti-plus"></i> позиция</button>
-        <span class="spacer" style="flex:1"></span>
+        <span class="svc-split" id="svcSplit" style="flex:1;justify-content:flex-end;margin:0"></span>
         <span class="svc-total-label">Итого</span>
         <span class="svc-total" id="svcTotal">—</span>
+      </div>
+      <div class="svc-files" id="svcFilesList"></div>
+      <div class="fin-form-row">
+        <button class="btn-ghost" id="svcAddFileBtn"><i class="ti ti-paperclip"></i> Фото / скан</button>
+        <input type="file" id="svcFileInput" accept="image/*,application/pdf" multiple style="display:none">
       </div>
       <div class="fin-form-row">
         <div class="fin-form-actions" style="flex:1">
@@ -5629,11 +5674,12 @@ async function loadGarage() {
     const data = await apiFetch('/garage/bootstrap');
     state.vehicles = data.vehicles;
     state.services = data.services;
+    state.garageFiles = data.files || [];
     garageOnline = true;
     if (state.currentVehicle && !state.vehicles.find(v => v.id === state.currentVehicle)) state.currentVehicle = null;
     if (garageView === 'detail' && !state.currentVehicle) garageView = 'list';
   } catch (e) {
-    garageOnline = false; state.vehicles = []; state.services = [];
+    garageOnline = false; state.vehicles = []; state.services = []; state.garageFiles = [];
   }
   updateGarageStatus();
   renderGarage();
@@ -5751,6 +5797,11 @@ function renderVehicleDetail() {
   if (!v) { garageView = 'list'; renderGarage(); return; }
   const svcs = vehicleServices(v.id);
   const total = svcs.reduce((s, x) => s + (x.cost || 0), 0);
+  const split = svcKindSums(svcs.flatMap(x => x.items || []));
+  const splitParts = [];
+  if (split.work) splitParts.push(`<span><i class="ti ti-tool"></i>работы ${fmtMoney(split.work)}</span>`);
+  if (split.part) splitParts.push(`<span><i class="ti ti-package"></i>запчасти ${fmtMoney(split.part)}</span>`);
+  if (split.other && splitParts.length) splitParts.push(`<span>без типа ${fmtMoney(split.other)}</span>`);
   const lastMileage = svcs.map(s => s.mileage).filter(m => m != null)[0];
   const labels = vehLabelsHtml(v);
 
@@ -5770,6 +5821,7 @@ function renderVehicleDetail() {
       <div><div class="veh-stat-val" style="color:var(--accent)">${fmtMoney(total)}</div><div class="veh-stat-label">потрачено</div></div>
       ${lastMileage != null ? `<div><div class="veh-stat-val">${lastMileage.toLocaleString('ru-RU')}</div><div class="veh-stat-label">пробег, км</div></div>` : ''}
     </div>
+    ${splitParts.length ? `<div class="svc-split">${splitParts.join('')}</div>` : ''}
     <div class="veh-actions">
       <button class="va-edit"><i class="ti ti-pencil"></i> Изменить</button>
       <button class="va-archive"><i class="ti ti-archive"></i> В архив</button>
@@ -5792,6 +5844,8 @@ function renderVehicleDetail() {
     if (s.date) meta.push(`<span><i class="ti ti-calendar"></i>${fmtDateRu(s.date)}</span>`);
     if (s.mileage != null) meta.push(`<span><i class="ti ti-gauge"></i>${s.mileage.toLocaleString('ru-RU')} км</span>`);
     if (items.length) meta.push(`<span><i class="ti ti-list"></i>${items.length}</span>`);
+    const files = svcFiles(s.id);
+    if (files.length) meta.push(`<span><i class="ti ti-paperclip"></i>${files.length}</span>`);
     wrap.innerHTML = `
       <div class="svc-row">
         <i class="ti ti-chevron-down svc-chev"></i>
@@ -5802,14 +5856,18 @@ function renderVehicleDetail() {
         ${s.cost != null ? `<div class="svc-cost">${fmtMoney(s.cost)}</div>` : ''}
       </div>
       <div class="svc-sub">
-        ${items.map(it => `<div class="svc-sub-row"><span class="ssr-name">${escapeHtml(it.name || '—')}</span>${it.cost != null ? `<span class="ssr-cost">${fmtMoney(it.cost)}</span>` : ''}</div>`).join('')
-          || '<div class="svc-sub-row" style="color:var(--text3)">Подпунктов нет</div>'}
+        ${svcGroupsHtml(items) || '<div class="svc-sub-row" style="color:var(--text3)">Подпунктов нет</div>'}
+        <div class="svc-files"></div>
         <div class="svc-sub-actions"><button class="ssa-edit"><i class="ti ti-pencil"></i> Изменить</button></div>
       </div>
     `;
+    // миниатюры грузятся только когда запись раскрыта
+    const showThumbs = () => { const box = wrap.querySelector('.svc-sub .svc-files'); if (!box.childElementCount) files.forEach(f => box.appendChild(svcFileThumb(f))); };
+    if (svcOpen.has(s.id)) showThumbs();
     wrap.querySelector('.svc-row').onclick = () => {
       if (svcOpen.has(s.id)) svcOpen.delete(s.id); else svcOpen.add(s.id);
       wrap.classList.toggle('open', svcOpen.has(s.id));
+      if (svcOpen.has(s.id)) showThumbs();
     };
     wrap.querySelector('.ssa-edit').onclick = () => openSvcForm(s);
     el.appendChild(wrap);
@@ -5824,30 +5882,165 @@ function openSvcForm(s) {
   document.getElementById('svcDate').value = s ? (s.date || today()) : today();
   document.getElementById('svcMileage').value = (s && s.mileage != null) ? s.mileage : '';
   document.getElementById('svcItemsList').innerHTML = '';
-  const items = (s && s.items && s.items.length) ? s.items : [{ name: '', cost: null }];
-  items.forEach(it => addSvcItemRow(it.name, it.cost));
+  const items = (s && s.items && s.items.length) ? s.items : [{ name: '', cost: null, kind: 'work' }];
+  items.forEach(it => addSvcItemRow(it.name, it.cost, false, it.kind || null));
   updateSvcTotal();
+  clearSvcPending();
+  renderSvcFormFiles();
   document.getElementById('svcDelBtn').style.display = s ? '' : 'none';
   document.getElementById('svcSaveBtn').textContent = s ? 'Сохранить' : 'Добавить';
   document.getElementById('svcForm').classList.add('open');
   document.getElementById('svcName').focus();
 }
-function closeSvcForm() { document.getElementById('svcForm').classList.remove('open'); serviceEditId = null; }
+function closeSvcForm() { document.getElementById('svcForm').classList.remove('open'); serviceEditId = null; clearSvcPending(); }
 
-// ── подпункты записи: «вид работ | сумма», итог считается сам ──
+// ── документы записи: фото/сканы в БД; в форме копятся и применяются при сохранении ──
+let svcPendingFiles = [];          // [{file, url}] — выбраны, ещё не загружены
+const svcRemovedFiles = new Set(); // id загруженных файлов, помеченных на удаление
+const garageFileUrls = new Map();  // id → objectURL (кэш на сессию)
+function svcFiles(sid) { return (state.garageFiles || []).filter(f => f.service_id === sid); }
+function clearSvcPending() {
+  svcPendingFiles.forEach(p => URL.revokeObjectURL(p.url));
+  svcPendingFiles = []; svcRemovedFiles.clear();
+}
+async function garageFileUrl(id) {
+  if (garageFileUrls.has(id)) return garageFileUrls.get(id);
+  const headers = {};
+  if (TG_INIT) headers['X-Telegram-Init-Data'] = TG_INIT;
+  const r = await fetch(API + '/garage/files/' + id, { headers });
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  const url = URL.createObjectURL(await r.blob());
+  garageFileUrls.set(id, url);
+  return url;
+}
+// f — метаданные загруженного файла или {pending:true, file, url}
+function svcFileThumb(f, onDel) {
+  const isPdf = (f.pending ? f.file.type : f.mime) === 'application/pdf';
+  const el = document.createElement('div');
+  el.className = 'svc-file' + (f.pending ? ' pending' : '');
+  el.title = f.pending ? f.file.name : (f.filename || '');
+  el.innerHTML = isPdf ? '<i class="ti ti-file-type-pdf"></i>' : '<i class="ti ti-photo"></i>';
+  const del = document.createElement('span'); del.className = 'sf-del'; del.innerHTML = '<i class="ti ti-x"></i>';
+  del.onclick = (e) => { e.stopPropagation(); onDel(); };
+  if (onDel) el.appendChild(del);
+  if (!isPdf) {
+    const setImg = (url) => { el.innerHTML = ''; const img = document.createElement('img'); img.src = url; el.appendChild(img); if (onDel) el.appendChild(del); };
+    if (f.pending) setImg(f.url);
+    else garageFileUrl(f.id).then(setImg).catch(() => { el.innerHTML = '<i class="ti ti-photo-off"></i>'; if (onDel) el.appendChild(del); });
+  }
+  el.onclick = async () => {
+    const url = f.pending ? f.url : await garageFileUrl(f.id).catch(() => null);
+    if (!url) return;
+    if (isPdf) { window.open(url, '_blank'); return; }
+    const ov = document.createElement('div'); ov.className = 'svc-file-viewer';
+    ov.innerHTML = `<img src="${url}"><button class="sfv-close"><i class="ti ti-x"></i></button>`;
+    ov.onclick = () => ov.remove();
+    document.body.appendChild(ov);
+  };
+  return el;
+}
+function renderSvcFormFiles() {
+  const box = document.getElementById('svcFilesList');
+  box.innerHTML = '';
+  if (serviceEditId) svcFiles(serviceEditId).filter(f => !svcRemovedFiles.has(f.id))
+    .forEach(f => box.appendChild(svcFileThumb(f, () => { svcRemovedFiles.add(f.id); renderSvcFormFiles(); })));
+  svcPendingFiles.forEach(p => box.appendChild(svcFileThumb({ pending: true, ...p }, () => {
+    URL.revokeObjectURL(p.url); svcPendingFiles = svcPendingFiles.filter(x => x !== p); renderSvcFormFiles();
+  })));
+}
+// фото ужимаем до 2400px по длинной стороне (JPEG 0.85) — текст чека читается, вес ~0.5 МБ
+async function shrinkSvcImage(file) {
+  if (!file.type.startsWith('image/')) return file;
+  try {
+    const bmp = await createImageBitmap(file, { imageOrientation: 'from-image' });
+    const k = Math.min(1, 2400 / Math.max(bmp.width, bmp.height));
+    const cv = document.createElement('canvas');
+    cv.width = Math.round(bmp.width * k); cv.height = Math.round(bmp.height * k);
+    cv.getContext('2d').drawImage(bmp, 0, 0, cv.width, cv.height);
+    bmp.close && bmp.close();
+    const blob = await new Promise(res => cv.toBlob(res, 'image/jpeg', 0.85));
+    if (!blob || blob.size >= file.size) return file;
+    return new File([blob], file.name.replace(/\.[^.]+$/, '') + '.jpg', { type: 'image/jpeg' });
+  } catch (e) { return file; }
+}
+async function addSvcPendingFiles(list) {
+  for (const f of list) {
+    if (f.type !== 'application/pdf' && !f.type.startsWith('image/')) continue;
+    const file = await shrinkSvcImage(f);
+    svcPendingFiles.push({ file, url: URL.createObjectURL(file) });
+  }
+  renderSvcFormFiles();
+}
+async function flushSvcFiles(serviceId) {
+  const headers = {};
+  if (TG_INIT) headers['X-Telegram-Init-Data'] = TG_INIT;
+  const errors = [];
+  for (const id of svcRemovedFiles) {
+    try { await apiFetch('/garage/files/' + id, { method: 'DELETE' }); state.garageFiles = state.garageFiles.filter(f => f.id !== id); }
+    catch (e) { errors.push('удаление'); }
+  }
+  for (const p of svcPendingFiles) {
+    const fd = new FormData(); fd.append('file', p.file);
+    try {
+      const r = await fetch(API + '/garage/services/' + serviceId + '/files', { method: 'POST', headers, body: fd });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
+      state.garageFiles.push(d);
+    } catch (e) { errors.push(p.file.name + ': ' + e.message); }
+  }
+  if (errors.length) alert('Не все файлы сохранились:\n' + errors.join('\n'));
+}
+
+// ── подпункты записи: «тип | вид работ | сумма», итог считается сам ──
+// kind: 'work' — работа, 'part' — запчасть, null — без типа (старые записи)
+const SVC_KINDS = {
+  work:  { icon: 'ti-tool',     label: 'Работы',   title: 'Работа' },
+  part:  { icon: 'ti-package',  label: 'Запчасти', title: 'Запчасть' },
+  other: { icon: 'ti-question-mark', label: 'Без типа', title: 'Без типа — нажмите, чтобы выбрать' },
+};
+function svcKindSums(items) {
+  const r = { work: 0, part: 0, other: 0 };
+  (items || []).forEach(it => { r[it.kind === 'work' || it.kind === 'part' ? it.kind : 'other'] += it.cost || 0; });
+  return r;
+}
+function svcGroupsHtml(items) {
+  return ['work', 'part', 'other'].map(k => {
+    const grp = (items || []).filter(it => (it.kind === 'work' || it.kind === 'part' ? it.kind : 'other') === k);
+    if (!grp.length) return '';
+    const sum = grp.reduce((a, it) => a + (it.cost || 0), 0);
+    return `<div class="svc-sub-group"><span><i class="ti ${SVC_KINDS[k].icon}"></i>${SVC_KINDS[k].label}</span><span class="ssr-cost">${fmtMoney(sum)}</span></div>`
+      + grp.map(it => `<div class="svc-sub-row"><span class="ssr-name">${escapeHtml(it.name || '—')}</span>${it.cost != null ? `<span class="ssr-cost">${fmtMoney(it.cost)}</span>` : ''}</div>`).join('');
+  }).join('');
+}
 function parseSvcCost(v) {
   const raw = String(v || '').replace(',', '.').replace(/\s/g, '');
   return raw !== '' ? (parseFloat(raw) || 0) : null;
 }
-function addSvcItemRow(name, cost, focus) {
+function setSvcRowKind(row, kind) {
+  row.dataset.kind = kind || '';
+  const k = SVC_KINDS[kind || 'other'];
+  const btn = row.querySelector('.sir-kind');
+  btn.innerHTML = `<i class="ti ${k.icon}"></i>`;
+  btn.title = k.title;
+  btn.className = 'sir-kind' + (kind ? ' ' + kind : '');
+}
+function addSvcItemRow(name, cost, focus, kind) {
+  if (kind === undefined) {
+    // новая строка наследует тип предыдущей: в чеке работы и запчасти идут блоками
+    const rows = document.querySelectorAll('#svcItemsList .svc-item-row');
+    kind = (rows.length && rows[rows.length - 1].dataset.kind) || 'work';
+  }
   const row = document.createElement('div'); row.className = 'svc-item-row';
   row.innerHTML = `
+    <button class="sir-kind"></button>
     <input class="fin-input sir-name" placeholder="Вид работ / запчасть" autocomplete="off">
     <input class="fin-input amount sir-cost" placeholder="сумма" inputmode="decimal">
     <button class="sir-del" title="Убрать"><i class="ti ti-x"></i></button>`;
+  setSvcRowKind(row, kind);
   const nameEl = row.querySelector('.sir-name'), costEl = row.querySelector('.sir-cost');
   nameEl.value = name || '';
   costEl.value = cost != null ? cost : '';
+  row.querySelector('.sir-kind').onclick = () => { setSvcRowKind(row, row.dataset.kind === 'work' ? 'part' : 'work'); updateSvcTotal(); };
   nameEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); costEl.focus(); } });
   costEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); addSvcItemRow('', null, true); } });
   costEl.addEventListener('input', updateSvcTotal);
@@ -5857,12 +6050,19 @@ function addSvcItemRow(name, cost, focus) {
 }
 function readSvcItems() {
   return [...document.querySelectorAll('#svcItemsList .svc-item-row')]
-    .map(r => ({ name: r.querySelector('.sir-name').value.trim(), cost: parseSvcCost(r.querySelector('.sir-cost').value) }))
+    .map(r => ({ name: r.querySelector('.sir-name').value.trim(), cost: parseSvcCost(r.querySelector('.sir-cost').value), kind: r.dataset.kind || null }))
     .filter(it => it.name || it.cost != null);
 }
 function updateSvcTotal() {
-  const costs = readSvcItems().map(it => it.cost).filter(c => c != null);
+  const items = readSvcItems();
+  const costs = items.map(it => it.cost).filter(c => c != null);
   document.getElementById('svcTotal').textContent = costs.length ? fmtMoney(costs.reduce((a, b) => a + b, 0)) : '—';
+  const sp = svcKindSums(items);
+  document.getElementById('svcSplit').innerHTML = [
+    sp.work ? `<span><i class="ti ti-tool"></i>${fmtMoney(sp.work)}</span>` : '',
+    sp.part ? `<span><i class="ti ti-package"></i>${fmtMoney(sp.part)}</span>` : '',
+    sp.other ? `<span><i class="ti ti-question-mark"></i>${fmtMoney(sp.other)}</span>` : '',
+  ].join('');
 }
 
 async function saveSvcForm() {
@@ -5873,7 +6073,10 @@ async function saveSvcForm() {
   const items = readSvcItems();
   const milRaw = document.getElementById('svcMileage').value.replace(/\s/g, '');
   const mileage = milRaw !== '' ? (parseInt(milRaw, 10) || 0) : null;
+  const saveBtn = document.getElementById('svcSaveBtn');
+  saveBtn.disabled = true;
   try {
+    let sid = serviceEditId;
     if (serviceEditId) {
       const s = state.services.find(x => x.id === serviceEditId);
       const upd = await apiFetch('/garage/services/' + serviceEditId, { method: 'PATCH', headers: JH, body: JSON.stringify({ name, date, mileage, items }) });
@@ -5881,8 +6084,14 @@ async function saveSvcForm() {
     } else {
       const created = await apiFetch('/garage/services', { method: 'POST', headers: JH, body: JSON.stringify({ vehicle_id: state.currentVehicle, name, date, mileage, items }) });
       state.services.push(created);
+      sid = created.id;
+    }
+    if (svcPendingFiles.length || svcRemovedFiles.size) {
+      saveBtn.textContent = 'Загрузка…';
+      await flushSvcFiles(sid);
     }
   } catch (e) { garageOnline = false; }
+  saveBtn.disabled = false;
   closeSvcForm(); updateGarageStatus(); renderGarage();
 }
 async function deleteSvcForm() {
@@ -5891,6 +6100,7 @@ async function deleteSvcForm() {
   const id = serviceEditId;
   try { await apiFetch('/garage/services/' + id, { method: 'DELETE' }); } catch (e) { garageOnline = false; }
   state.services = state.services.filter(x => x.id !== id);
+  state.garageFiles = (state.garageFiles || []).filter(f => f.service_id !== id);
   closeSvcForm(); updateGarageStatus(); renderGarage();
 }
 
@@ -5985,6 +6195,8 @@ document.getElementById('svcSaveBtn').onclick = saveSvcForm;
 document.getElementById('svcDelBtn').onclick = deleteSvcForm;
 document.getElementById('svcName').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); const f = document.querySelector('#svcItemsList .sir-name'); if (f) f.focus(); } });
 document.getElementById('svcAddItemBtn').onclick = () => addSvcItemRow('', null, true);
+document.getElementById('svcAddFileBtn').onclick = () => document.getElementById('svcFileInput').click();
+document.getElementById('svcFileInput').onchange = async (e) => { const list = [...e.target.files]; e.target.value = ''; await addSvcPendingFiles(list); };
 document.getElementById('addLabelBtn').onclick = () => addLabelRow();
 document.getElementById('cancelVehicleBtn').onclick = closeVehicleModal;
 document.getElementById('saveVehicleBtn').onclick = saveVehicleModal;

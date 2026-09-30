@@ -54,7 +54,8 @@ CREATE TABLE IF NOT EXISTS garage.services (
 -- история обслуживания ТС, новые сверху (сортировка по дате)
 CREATE INDEX IF NOT EXISTS idx_services_vehicle ON garage.services (vehicle_id, date DESC);
 
--- подпункты записи: [{name, cost}]; cost записи = сумма подпунктов (считает API).
+-- подпункты записи: [{name, cost, kind}]; kind = 'work' | 'part' | null (без типа);
+-- cost записи = сумма подпунктов (считает API).
 -- Колонка добавляется один раз; старые записи получают один подпункт
 -- с собственным названием и суммой (повторно не выполняется).
 DO $$
@@ -69,6 +70,22 @@ BEGIN
     END IF;
 END;
 $$;
+
+-- ── Документы записи: фото/сканы чеков и заказ-нарядов ─────────
+-- Хранятся прямо в БД (bytea), чтобы попадать в ночной pg_dumpall → Яндекс Диск
+-- вместе с записями. Фото сжимает клиент (~2400px JPEG), PDF — как есть.
+-- bootstrap отдаёт только метаданные; содержимое — GET /api/garage/files/{id}.
+CREATE TABLE IF NOT EXISTS garage.service_files (
+    id          uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+    service_id  uuid        NOT NULL REFERENCES garage.services(id) ON DELETE CASCADE,
+    filename    text        NOT NULL DEFAULT '',
+    mime        text        NOT NULL,
+    size        int         NOT NULL,
+    data        bytea       NOT NULL,
+    created_at  timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_service_files_service ON garage.service_files (service_id, created_at);
 
 -- ── updated_at автоматика ─────────────────────────────────────
 CREATE OR REPLACE FUNCTION garage.trg_touch()
@@ -93,6 +110,7 @@ CREATE OR REPLACE TRIGGER services_touch
 ALTER SCHEMA   garage                 OWNER TO portal;
 ALTER TABLE    garage.vehicles        OWNER TO portal;
 ALTER TABLE    garage.services        OWNER TO portal;
+ALTER TABLE    garage.service_files   OWNER TO portal;
 ALTER FUNCTION garage.trg_touch()     OWNER TO portal;
 
 -- ════════════════════════════════════════════════════════════
