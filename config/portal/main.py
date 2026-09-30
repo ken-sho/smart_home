@@ -1476,6 +1476,7 @@ class ServiceIn(BaseModel):
     cost: float | None = None
     date: Date | None = None   # Date = datetime.date (алиас), чтобы имя поля date не затеняло тип
     mileage: int | None = None
+    items: list | None = None   # [{name, cost}]; если задано — cost = сумма подпунктов
 
 
 class ServicePatch(BaseModel):
@@ -1484,6 +1485,30 @@ class ServicePatch(BaseModel):
     date: Date | None = None
     mileage: int | None = None
     position: int | None = None
+    items: list | None = None
+
+
+def _clean_items(items: list) -> tuple[list, float | None]:
+    """Нормализует подпункты записи и считает их сумму (None, если сумм нет)."""
+    out, total, has_cost = [], 0.0, False
+    for it in items:
+        if not isinstance(it, dict):
+            continue
+        name = str(it.get("name") or "").strip()
+        cost = it.get("cost")
+        try:
+            cost = round(float(cost), 2) if cost not in (None, "") else None
+        except (TypeError, ValueError):
+            cost = None
+        if cost is not None and cost < 0:
+            raise HTTPException(400, "Сумма подпункта не может быть отрицательной")
+        if not name and cost is None:
+            continue
+        out.append({"name": name, "cost": cost})
+        if cost is not None:
+            total += cost
+            has_cost = True
+    return out, (round(total, 2) if has_cost else None)
 
 
 def _check_vtype(t):
@@ -1513,6 +1538,7 @@ def to_service(r) -> dict:
         "cost": float(r["cost"]) if r["cost"] is not None else None,
         "date": r["date"].isoformat() if r["date"] else None,
         "mileage": r["mileage"],
+        "items": r["items"] or [],
         "position": r["position"],
         "created_at": r["created_at"].isoformat(),
     }
@@ -1595,10 +1621,15 @@ async def create_service(s: ServiceIn):
             "SELECT COALESCE(max(position)+1, 0) FROM garage.services WHERE vehicle_id = $1",
             s.vehicle_id,
         )
+        if s.items is not None:
+            items, cost = _clean_items(s.items)
+        else:
+            cost = s.cost
+            items = [{"name": s.name, "cost": cost}] if (s.name or cost is not None) else []
         r = await c.fetchrow(
-            "INSERT INTO garage.services (vehicle_id, name, cost, date, mileage, position) "
-            "VALUES ($1, $2, $3, COALESCE($4, current_date), $5, $6) RETURNING *",
-            s.vehicle_id, s.name, s.cost, s.date, s.mileage, pos,
+            "INSERT INTO garage.services (vehicle_id, name, cost, date, mileage, position, items) "
+            "VALUES ($1, $2, $3, COALESCE($4, current_date), $5, $6, $7) RETURNING *",
+            s.vehicle_id, s.name, cost, s.date, s.mileage, pos, items,
         )
     return to_service(r)
 
@@ -1608,6 +1639,9 @@ async def update_service(service_id: uuid.UUID, s: ServicePatch):
     fields = {k: val for k, val in s.model_dump(exclude_unset=True).items()}
     if not fields:
         raise HTTPException(400, "Нет полей для обновления")
+    if "items" in fields:
+        # итог записи всегда считается из подпунктов
+        fields["items"], fields["cost"] = _clean_items(fields["items"] or [])
     cols = list(fields.keys())
     set_clause = ", ".join(f"{col} = ${i + 2}" for i, col in enumerate(cols))
     async with pool.acquire() as c:

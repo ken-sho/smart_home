@@ -38,7 +38,7 @@ CREATE TABLE IF NOT EXISTS garage.vehicles (
 CREATE INDEX IF NOT EXISTS idx_vehicles_archived ON garage.vehicles (archived, position);
 
 -- ── Записи обслуживания ───────────────────────────────────────
--- JS: state.services[i] = { id, vehicle_id, name, cost, date, mileage }
+-- JS: state.services[i] = { id, vehicle_id, name, cost, date, mileage, items }
 CREATE TABLE IF NOT EXISTS garage.services (
     id          uuid          PRIMARY KEY DEFAULT gen_random_uuid(),
     vehicle_id  uuid          NOT NULL REFERENCES garage.vehicles(id) ON DELETE CASCADE,
@@ -53,6 +53,22 @@ CREATE TABLE IF NOT EXISTS garage.services (
 
 -- история обслуживания ТС, новые сверху (сортировка по дате)
 CREATE INDEX IF NOT EXISTS idx_services_vehicle ON garage.services (vehicle_id, date DESC);
+
+-- подпункты записи: [{name, cost}]; cost записи = сумма подпунктов (считает API).
+-- Колонка добавляется один раз; старые записи получают один подпункт
+-- с собственным названием и суммой (повторно не выполняется).
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'garage' AND table_name = 'services' AND column_name = 'items'
+    ) THEN
+        ALTER TABLE garage.services ADD COLUMN items jsonb NOT NULL DEFAULT '[]'::jsonb;
+        UPDATE garage.services
+           SET items = jsonb_build_array(jsonb_build_object('name', name, 'cost', cost));
+    END IF;
+END;
+$$;
 
 -- ── updated_at автоматика ─────────────────────────────────────
 CREATE OR REPLACE FUNCTION garage.trg_touch()
