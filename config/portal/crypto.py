@@ -21,7 +21,9 @@
     закрытие ≥ T2                  → фиксировать до ⅔
     закрытие ≥ T1                  → фиксировать ⅓, стоп в безубыток
     иначе                          → держать
-  Покупка (свободные USDT от min_usdt), по каждой монете:
+  Покупка (свободные USDT от min_usdt), по каждой монете — по закрытию дня
+  (не по часовой цене); для монет с ATR < low_vol_atr_pct% цель = R1 (T1).
+  Повтор «Покупать X» в Telegram — не чаще buy_cooldown_days.
     S — ближайшая поддержка ниже цены, R1/R2 — сопротивления выше
     (нет второго сопротивления → R2 = R1 + 2·ATR),
     стоп = min(S − 0.5·ATR, вход − stop_min_atr·ATR) — не вплотную к входу,
@@ -58,6 +60,8 @@ DEFAULT_PARAMS = {
     "rsi_hot": 70,
     "rsi_buy": 40,
     "rr_strong": 4,             # такой R:R у поддержки проходит и против тренда
+    "low_vol_atr_pct": 2,       # дневной ход (ATR) ниже — R:R считаем только до T1
+    "buy_cooldown_days": 3,     # повторный сигнал «Покупать X» в Telegram не чаще
     "fiat_fee_pct": 5,          # потери при выводе USDT → ₽ (обмен + комиссия), для оценки
 }
 
@@ -257,7 +261,8 @@ def indicators(points, price) -> dict | None:
         "close_day": closed[-1]["day"].isoformat(),
         "prev_close": C[-2],
         "week_close": sundays[-1]["close"] if sundays else None,
-        "rsi": _rsi(C + [price]),             # живой RSI (с текущей ценой)
+        "rsi": _rsi(C + [price]),             # живой RSI (с текущей ценой) — для показа
+        "rsi_close": _rsi(C),                 # RSI по закрытиям — для правил покупки
         "ma20": _sma(C, 20),
         "ma50": _sma(C, 50),
         "atr": atr,
@@ -377,45 +382,55 @@ def sell_advice(coin, ind, plan, levels, prm, sold_since, max_close_since) -> di
 def buy_candidate(coin, ind, levels, prm, usdt_apr, capital, usdt) -> dict | None:
     if not ind:
         return None
-    p, atr = coin["price"], ind["atr"]
+    # решение — по закрытию дня, как и продажи: часовая цена у края зоны давала
+    # дребезг «Покупать ↔ Ждать» по несколько раз в день
+    p, atr = ind["close"], ind["atr"]
+    rsi = ind.get("rsi_close", ind["rsi"])
     sup = [l for l in levels if l < p]
     res = sorted(l for l in levels if l > p)
     S = max(sup) if sup else ind["lo30"]
     R1 = res[0] if res else max(ind["hi30"], p + 2 * atr)
     R2 = res[1] if len(res) > 1 else R1 + 2 * atr
+    # монета с маленьким дневным ходом (TRX ~1.3%/день) до T2 почти не доходит —
+    # R:R честнее считать только до T1, иначе далёкая T2 раздувает его
+    low_vol = atr / p * 100 < prm["low_vol_atr_pct"]
+    target = R1 if low_vol else (R1 + 2 * R2) / 3
     stop_at = lambda e: min(S - 0.5 * atr, e - prm["stop_min_atr"] * atr)
-    rr_at = lambda e: ((R1 + 2 * R2) / 3 - e) / (e - stop_at(e)) if e > stop_at(e) else None
+    rr_at = lambda e: (target - e) / (e - stop_at(e)) if e > stop_at(e) else None
     stop = stop_at(p)
     rr = rr_at(p)
     real = coin["earn_apr"] - coin["inflation"]
     rr_need = prm["rr_min_low_earn"] if real < usdt_apr else prm["rr_min"]
     zone_hi = S + prm["near_atr"] * atr
     near = p <= zone_hi
-    hot = ind["rsi"] is not None and ind["rsi"] > prm["rsi_hot"]
+    hot = rsi is not None and rsi > prm["rsi_hot"]
     trend = ((ind["ma50"] is not None and p > ind["ma50"])
-             or (ind["rsi"] is not None and ind["rsi"] < prm["rsi_buy"])
+             or (rsi is not None and rsi < prm["rsi_buy"])
              or bool(rr and rr >= prm["rr_strong"]))
     ok = bool(rr and rr >= rr_need and near and not hot and trend)
     risk_frac = (p - stop) / p if p > stop else None
     amount = min(capital * prm["risk_pct"] / 100 / risk_frac, usdt * prm["max_part"], usdt) if risk_frac else 0
     mark = lambda b: "✓" if b else "✗"
     rr_zone = rr_at(zone_hi)
-    rsi_s = f"{ind['rsi']:.0f}" if ind["rsi"] is not None else "—"
+    rsi_s = f"{rsi:.0f}" if rsi is not None else "—"
     if ind["ma50"] is None:
         trend_s = "MA50 ещё нет"
     elif p > ind["ma50"]:
-        trend_s = f"Цена выше MA50 {_px(ind['ma50'])}"
-    elif ind["rsi"] is not None and ind["rsi"] < prm["rsi_buy"]:
-        trend_s = f"Цена ниже MA50 {_px(ind['ma50'])}, но RSI < {prm['rsi_buy']:g}"
+        trend_s = f"Закрытие выше MA50 {_px(ind['ma50'])}"
+    elif rsi is not None and rsi < prm["rsi_buy"]:
+        trend_s = f"Закрытие ниже MA50 {_px(ind['ma50'])}, но RSI < {prm['rsi_buy']:g}"
     elif trend:
-        trend_s = f"Цена ниже MA50 {_px(ind['ma50'])}, но R:R ≥ {prm['rr_strong']:g} — сильный вход у поддержки"
+        trend_s = f"Закрытие ниже MA50 {_px(ind['ma50'])}, но R:R ≥ {prm['rr_strong']:g} — сильный вход у поддержки"
     else:
-        trend_s = f"Цена ниже MA50 {_px(ind['ma50'])}, RSI ≥ {prm['rsi_buy']:g}, R:R < {prm['rr_strong']:g}"
+        trend_s = f"Закрытие ниже MA50 {_px(ind['ma50'])}, RSI ≥ {prm['rsi_buy']:g}, R:R < {prm['rr_strong']:g}"
+    goal_s = (f"цель T1 {_px(R1)} (ход {atr / p * 100:.1f}%/день — до T2 {_px(R2)} не считаем)" if low_vol
+              else f"цели {_px(R1)} / {_px(R2)}")
     reasons = [
-        f"{mark(rr and rr >= rr_need)} R:R {rr:.1f} (нужно ≥ {rr_need:g}): стоп {_px(stop)}, цели {_px(R1)} / {_px(R2)}" if rr
-        else f"✗ Цена ниже расчётного стопа {_px(stop)}",
+        f"Закрытие {ind['close_day']}: {_px(p)}",
+        f"{mark(rr and rr >= rr_need)} R:R {rr:.1f} (нужно ≥ {rr_need:g}): стоп {_px(stop)}, {goal_s}" if rr
+        else f"✗ Закрытие ниже расчётного стопа {_px(stop)}",
         f"{mark(near)} Зона входа {_px(S)}–{_px(zone_hi)} (поддержка + {prm['near_atr']:g}·ATR)"
-        + ("" if near else f", цена на {_pct(p, zone_hi):.1f}% выше" + (f"; R:R в зоне ≈ {rr_zone:.1f}" if rr_zone else "")),
+        + ("" if near else f", закрытие на {_pct(p, zone_hi):.1f}% выше" + (f"; R:R в зоне ≈ {rr_zone:.1f}" if rr_zone else "")),
         f"{mark(not hot)} RSI {rsi_s}" + (" — перекупленность" if hot else ""),
         f"{mark(trend)} {trend_s}",
     ]
@@ -504,9 +519,16 @@ async def log_signals(c, snap) -> int:
                 "ORDER BY ts DESC, id DESC LIMIT 1", coin["symbol"]
             )
             if last != key:
+                # повтор того же «Покупать X» в пределах паузы — в историю пишем,
+                # но в Telegram не шлём (sent = true сразу)
+                quiet = adv["status"] == "buy" and bool(await c.fetchval(
+                    "SELECT 1 FROM crypto.signals WHERE symbol = $1 AND key = $2 "
+                    "AND ts > now() - make_interval(days => $3)",
+                    coin["symbol"], key, int(snap["params"]["buy_cooldown_days"])))
                 await c.execute(
-                    "INSERT INTO crypto.signals (symbol, key, status, title, reasons) VALUES ($1, $2, $3, $4, $5)",
-                    coin["symbol"], key, adv["status"], adv["title"], adv["reasons"],
+                    "INSERT INTO crypto.signals (symbol, key, status, title, reasons, sent) "
+                    "VALUES ($1, $2, $3, $4, $5, $6)",
+                    coin["symbol"], key, adv["status"], adv["title"], adv["reasons"], quiet,
                 )
                 n += 1
         ind = coin.get("ind")
@@ -550,7 +572,8 @@ def signal_message(sig, prev_status) -> str | None:
         head = f"📏 {sym}: {sig['title']}"
     elif st in LOUD:
         head = f"{NOTIFY_ICONS[st]} {who}: {sig['title']}"
-    elif prev_status in ("take", "exit", "buy"):
+    elif prev_status in ("take", "exit"):
+        # «сигнал снят» — только для продаж; снятие «Покупать» ни к чему не обязывает
         head = f"⚪ {who}: сигнал снят — {sig['title']}"
     else:
         return None
