@@ -24,6 +24,8 @@
   Покупка (свободные USDT от min_usdt), по каждой монете — по закрытию дня
   (не по часовой цене); для монет с ATR < low_vol_atr_pct% цель = R1 (T1).
   Повтор «Покупать X» в Telegram — не чаще buy_cooldown_days.
+  «Малый вход» (buy_small): в зоне, RSI не перегрет, R:R от rr_small_min до порога —
+  small_size от обычного размера (тренд не требуется — так он и проверялся в бэктесте).
     S — ближайшая поддержка ниже цены, R1/R2 — сопротивления выше
     (нет второго сопротивления → R2 = R1 + 2·ATR),
     стоп = min(S − 0.5·ATR, вход − stop_min_atr·ATR) — не вплотную к входу,
@@ -62,6 +64,8 @@ DEFAULT_PARAMS = {
     "rr_strong": 4,             # такой R:R у поддержки проходит и против тренда
     "low_vol_atr_pct": 2,       # дневной ход (ATR) ниже — R:R считаем только до T1
     "buy_cooldown_days": 3,     # повторный сигнал «Покупать X» в Telegram не чаще
+    "rr_small_min": 1.5,        # «малый вход»: R:R от этого значения до порога
+    "small_size": 0.5,          # доля обычного размера для «малого входа»
     "fiat_fee_pct": 5,          # потери при выводе USDT → ₽ (обмен + комиссия), для оценки
 }
 
@@ -408,6 +412,9 @@ def buy_candidate(coin, ind, levels, prm, usdt_apr, capital, usdt) -> dict | Non
              or (rsi is not None and rsi < prm["rsi_buy"])
              or bool(rr and rr >= prm["rr_strong"]))
     ok = bool(rr and rr >= rr_need and near and not hot and trend)
+    # «малый вход»: в зоне, но R:R чуть не дотягивает (обычно из-за высокой волатильности) —
+    # половина размера вместо пропуска (бэктест 11.2025–10.2026: лучше пропуска в обоих окнах)
+    small = bool(not ok and near and not hot and rr and prm["rr_small_min"] <= rr < rr_need)
     risk_frac = (p - stop) / p if p > stop else None
     amount = min(capital * prm["risk_pct"] / 100 / risk_frac, usdt * prm["max_part"], usdt) if risk_frac else 0
     mark = lambda b: "✓" if b else "✗"
@@ -437,7 +444,8 @@ def buy_candidate(coin, ind, levels, prm, usdt_apr, capital, usdt) -> dict | Non
     if real < usdt_apr:
         reasons.append(f"Earn {coin['earn_apr']:g}% − инфляция {coin['inflation']:g}% = {real:.1f}% < USDT {usdt_apr:g}% — порог R:R выше")
     return {
-        "symbol": coin["symbol"], "ok": ok, "rr": rr, "rr_need": rr_need,
+        "symbol": coin["symbol"], "ok": ok, "small": small, "rr": rr, "rr_need": rr_need,
+        "amount_small": amount * prm["small_size"],
         "amount": amount, "zone": [S, zone_hi],
         "plan": {"t1": R1, "t2": R2, "stop": stop},
         "reasons": reasons,
@@ -449,6 +457,19 @@ def buy_advice(cands, usdt, prm) -> dict:
         return {"status": "none", "title": f"Свободных USDT меньше {_usd(prm['min_usdt'])}", "reasons": [], "candidates": cands}
     good = sorted([c for c in cands if c["ok"]], key=lambda c: -c["rr"])
     if not good:
+        small = sorted([c for c in cands if c.get("small") and c["amount_small"] >= prm["min_usdt"]],
+                       key=lambda c: -c["rr"])
+        if small:
+            s = small[0]
+            return {
+                "status": "buy_small", "symbol": s["symbol"],
+                "title": f"Малый вход: {s['symbol']} на {_usd(s['amount_small'])}",
+                "reasons": [
+                    f"R:R {s['rr']:.1f} ниже порога {s['rr_need']:g} — половина обычного размера",
+                    f"План: T1 {_px(s['plan']['t1'])}, T2 {_px(s['plan']['t2'])}, стоп {_px(s['plan']['stop'])}",
+                ],
+                "candidates": cands,
+            }
         return {"status": "wait", "title": "Ждать", "reasons": [], "candidates": cands}
     b = good[0]
     return {
@@ -521,7 +542,7 @@ async def log_signals(c, snap) -> int:
             if last != key:
                 # повтор того же «Покупать X» в пределах паузы — в историю пишем,
                 # но в Telegram не шлём (sent = true сразу)
-                quiet = adv["status"] == "buy" and bool(await c.fetchval(
+                quiet = adv["status"] in ("buy", "buy_small") and bool(await c.fetchval(
                     "SELECT 1 FROM crypto.signals WHERE symbol = $1 AND key = $2 "
                     "AND ts > now() - make_interval(days => $3)",
                     coin["symbol"], key, int(snap["params"]["buy_cooldown_days"])))
@@ -559,8 +580,8 @@ async def log_signals(c, snap) -> int:
     return n
 
 
-NOTIFY_ICONS = {"take": "🟡", "exit": "🔴", "buy": "🟢", "noplan": "🔵", "event": "📏"}
-LOUD = ("take", "exit", "buy", "noplan")
+NOTIFY_ICONS = {"take": "🟡", "exit": "🔴", "buy": "🟢", "buy_small": "🔹", "noplan": "🔵", "event": "📏"}
+LOUD = ("take", "exit", "buy", "buy_small", "noplan")
 
 
 def signal_message(sig, prev_status) -> str | None:

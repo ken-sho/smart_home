@@ -1249,6 +1249,8 @@ input[type=number]:focus { border-color: var(--accent); }
 .crypto-adv.st-exit .crypto-adv-title { color: var(--red); }
 .crypto-adv.st-buy { border-left-color: var(--accent); background: var(--accent-bg); }
 .crypto-adv.st-buy .crypto-adv-title { color: var(--accent-text); }
+.crypto-adv.st-buy_small { border-left-color: var(--blue); background: var(--blue-bg); }
+.crypto-adv.st-buy_small .crypto-adv-title { color: var(--blue); }
 .crypto-adv.st-noplan { border-left-color: var(--blue); background: var(--blue-bg); }
 .crypto-adv.st-noplan .crypto-adv-title { color: var(--blue); }
 .crypto-adv.st-none .crypto-adv-title { color: var(--text3); font-weight: 600; font-size: 11.5px; }
@@ -6559,7 +6561,7 @@ function cryptoAdviceHtml(c) {
   let extra = '';
   if (c.symbol === 'USDT' && a.candidates && a.status !== 'none') {
     extra = a.candidates.map(k => `
-      <details class="crypto-cand"><summary>${escapeHtml(k.symbol)} — ${k.ok ? 'проходит' : 'не сейчас'}${k.rr != null ? ` · R:R ${k.rr.toFixed(1)} / нужно ${k.rr_need}` : ''} · зона ${k.zone.map(v => v.toFixed(4)).join('–')}</summary>
+      <details class="crypto-cand"><summary>${escapeHtml(k.symbol)} — ${k.ok ? 'проходит' : (k.small ? 'малый вход' : 'не сейчас')}${k.rr != null ? ` · R:R ${k.rr.toFixed(1)} / нужно ${k.rr_need}` : ''} · зона ${k.zone.map(v => v.toFixed(4)).join('–')}</summary>
         ${li(k.reasons)}
       </details>`).join('');
   }
