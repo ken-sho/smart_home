@@ -56,6 +56,21 @@ INSERT INTO crypto.assets (symbol, name, cg_id, earn_apr, inflation, fee_pct, po
 SELECT 'USDT', 'Доллары', NULL, 4.65, 0, 0, 3
 WHERE NOT EXISTS (SELECT 1 FROM crypto.assets WHERE symbol = 'USDT');
 
+-- стратегия монеты (настройки карточки):
+--   strategy      swing — свинг у поддержки; hold — без сигналов на покупку, продажи по плану;
+--                 dca — накопление: напоминание купить dca_amount каждого dca_day-го
+--   check_hours   как часто проверять вход (1/4/6/12/24 ч, от 12:00 МСК); продажи — по закрытию дня
+--   cooldown_days пауза между повторами «Покупать X» в Telegram (0 — без паузы)
+ALTER TABLE crypto.assets ADD COLUMN IF NOT EXISTS strategy      text          NOT NULL DEFAULT 'swing';
+ALTER TABLE crypto.assets ADD COLUMN IF NOT EXISTS check_hours   smallint      NOT NULL DEFAULT 24;
+ALTER TABLE crypto.assets ADD COLUMN IF NOT EXISTS cooldown_days smallint      NOT NULL DEFAULT 3;
+ALTER TABLE crypto.assets ADD COLUMN IF NOT EXISTS dca_amount    numeric(14,2) NOT NULL DEFAULT 0;
+ALTER TABLE crypto.assets ADD COLUMN IF NOT EXISTS dca_day       smallint      NOT NULL DEFAULT 25;
+--   quiet_from/quiet_to — тихие часы по МСК (0–23): сообщения по монете в это время
+--   откладываются до конца окна (NULL — без тишины). Окно может переходить через полночь.
+ALTER TABLE crypto.assets ADD COLUMN IF NOT EXISTS quiet_from    smallint;
+ALTER TABLE crypto.assets ADD COLUMN IF NOT EXISTS quiet_to      smallint;
+
 -- ── История цен ───────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS crypto.prices (
     symbol  text              NOT NULL REFERENCES crypto.assets(symbol) ON DELETE CASCADE,

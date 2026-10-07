@@ -1961,6 +1961,14 @@ class CryptoAssetPatch(BaseModel):
     earn_apr: float | None = None
     core_qty: float | None = None
     fee_pct: float | None = None
+    strategy: str | None = None        # swing | hold | dca
+    check_hours: int | None = None     # 1 | 4 | 6 | 12 | 24
+    cooldown_days: int | None = None   # 0..30
+    dca_amount: float | None = None
+    dca_day: int | None = None         # 1..28
+    quiet: bool | None = None          # False — снять тихие часы
+    quiet_from: int | None = None      # 0..23 МСК
+    quiet_to: int | None = None
 
 
 def to_crypto_trade(r) -> dict:
@@ -2279,10 +2287,26 @@ async def crypto_reconcile(x: CryptoReconcileIn):
 @app.patch("/api/crypto/assets/{symbol}")
 async def update_crypto_asset(symbol: str, a: CryptoAssetPatch):
     fields = {k: val for k, val in a.model_dump(exclude_unset=True).items() if val is not None}
+    quiet = fields.pop("quiet", None)
+    if quiet is False:
+        fields["quiet_from"] = fields["quiet_to"] = None
+    elif ("quiet_from" in fields) != ("quiet_to" in fields):
+        raise HTTPException(400, "Тихие часы: нужны и «с», и «по»")
     if not fields:
         raise HTTPException(400, "Нет полей для обновления")
-    if any(v < 0 for v in fields.values()):
+    if any(isinstance(v, (int, float)) and v < 0 for v in fields.values()):
         raise HTTPException(400, "Значения не могут быть отрицательными")
+    if "strategy" in fields and fields["strategy"] not in crypto.STRATEGIES:
+        raise HTTPException(400, "Стратегия: swing, hold или dca")
+    if "check_hours" in fields and fields["check_hours"] not in crypto.CHECK_HOURS:
+        raise HTTPException(400, "Проверка входа: 1, 4, 6, 12 или 24 часа")
+    if "cooldown_days" in fields and fields["cooldown_days"] > 30:
+        raise HTTPException(400, "Пауза — не больше 30 дней")
+    if "dca_day" in fields and not 1 <= fields["dca_day"] <= 28:
+        raise HTTPException(400, "День накопления — с 1 по 28")
+    for k in ("quiet_from", "quiet_to"):
+        if fields.get(k) is not None and not 0 <= fields[k] <= 23:
+            raise HTTPException(400, "Тихие часы — от 0 до 23")
     cols = list(fields.keys())
     set_clause = ", ".join(f"{col} = ${i + 2}" for i, col in enumerate(cols))
     async with pool.acquire() as c:
@@ -2913,13 +2937,22 @@ async def _crypto_notify(c, token, chat_id, thread_id):
        отправленными без сообщения; упавшая отправка повторится на следующем тике,
        но не дольше суток (старое уже неактуально)."""
     rows = await c.fetch("SELECT * FROM crypto.signals WHERE NOT sent ORDER BY id")
+    if not rows:
+        return
+    quiet = {r["symbol"]: (r["quiet_from"], r["quiet_to"])
+             for r in await c.fetch("SELECT symbol, quiet_from, quiet_to FROM crypto.assets")}
+    now = datetime.now(ZoneInfo("UTC"))
     for s in rows:
+        coin = crypto.signal_coin(s)
+        if coin in quiet and crypto.in_quiet(*quiet[coin], now):
+            continue   # тихие часы монеты — отправим, когда окно закончится
         prev = await c.fetchval(
             "SELECT status FROM crypto.signals WHERE symbol = $1 AND id < $2 AND status <> 'event' "
             "ORDER BY id DESC LIMIT 1", s["symbol"], s["id"],
         )
-        text = crypto.signal_message(s, prev)
-        stale = datetime.now(ZoneInfo("UTC")) - s["ts"] > timedelta(days=1)
+        delayed = (s["ts"] + timedelta(hours=3)).strftime("%d.%m %H:%M") if now - s["ts"] > timedelta(minutes=30) else None
+        text = crypto.signal_message(s, prev, delayed)
+        stale = now - s["ts"] > timedelta(days=1)
         if text and not stale:
             try:
                 await send_message(token, chat_id, text, thread_id=thread_id)

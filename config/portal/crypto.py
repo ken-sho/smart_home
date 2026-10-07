@@ -190,6 +190,13 @@ async def portfolio(c) -> dict:
             "inflation": float(a["inflation"]),
             "core_qty": float(a["core_qty"]),
             "fee_pct": float(a["fee_pct"]),
+            "strategy": a["strategy"],
+            "check_hours": a["check_hours"],
+            "cooldown_days": a["cooldown_days"],
+            "dca_amount": float(a["dca_amount"]),
+            "dca_day": a["dca_day"],
+            "quiet_from": a["quiet_from"],
+            "quiet_to": a["quiet_to"],
             "price": price,
             "price_ts": ts,
             "change_24h": (price / price_24h - 1) * 100 if price and price_24h else None,
@@ -214,6 +221,50 @@ def _tday(ts) -> "date":
 
 def _today():
     return _tday(datetime.now(timezone.utc))
+
+
+CHECK_HOURS = (1, 4, 6, 12, 24)
+STRATEGIES = ("swing", "hold", "dca")
+
+
+def _checkpoint(now, every_h: int):
+    """Последняя плановая проверка входа ≤ now: от границы дня (12:00 МСК) с шагом every_h."""
+    t = now.astimezone(timezone.utc).replace(minute=0, second=0, microsecond=0)
+    for _ in range(25):
+        if (t.hour - DAY_SHIFT_H) % every_h == 0:
+            return t
+        t -= timedelta(hours=1)
+    return t
+
+
+def _price_at(points, t):
+    """Цена на момент проверки: последняя точка не позже t + 15 мин (сбор цен в :05)."""
+    limit = t + timedelta(minutes=15)
+    last = None
+    for ts, p in points:
+        if ts > limit:
+            break
+        last = p
+    return last
+
+
+def _msk(t) -> str:
+    return (t + timedelta(hours=3)).strftime("%H:%M")
+
+
+def in_quiet(qfrom, qto, now=None) -> bool:
+    """Тихие часы по МСК [qfrom, qto): 23→8 — через полночь; None — тишины нет."""
+    if qfrom is None or qto is None or qfrom == qto:
+        return False
+    h = ((now or datetime.now(timezone.utc)) + timedelta(hours=3)).hour
+    return qfrom <= h < qto if qfrom < qto else (h >= qfrom or h < qto)
+
+
+def signal_coin(sig) -> str | None:
+    """К какой монете относится сигнал: у советов по USDT — монета из ключа (buy_small:GRAM)."""
+    if sig["symbol"] != "USDT":
+        return sig["symbol"]
+    return sig["key"].split(":", 1)[1] if ":" in sig["key"] else None
 
 
 def _candles(points) -> list[dict]:
@@ -449,7 +500,7 @@ def buy_candidate(coin, ind, levels, prm, usdt_apr, capital, usdt) -> dict | Non
     goal_s = (f"цель T1 {_px(R1)} (ход {atr / p * 100:.1f}%/день — до T2 {_px(R2)} не считаем)" if low_vol
               else f"цели {_px(R1)} / {_px(R2)}")
     reasons = [
-        f"Закрытие {ind['close_day']} 12:00 МСК: {_px(p)}",
+        ind.get("check_label") or f"Закрытие {ind['close_day']} 12:00 МСК: {_px(p)}",
         f"{mark(rr and rr >= rr_need)} R:R {rr:.1f} (нужно ≥ {rr_need:g}): стоп {_px(stop)}, {goal_s}" if rr
         else f"✗ Закрытие ниже расчётного стопа {_px(stop)}",
         f"{mark(near)} Зона входа {_px(S)}–{_px(zone_hi)} (поддержка + {prm['near_atr']:g}·ATR)"
@@ -516,7 +567,8 @@ async def snapshot(c) -> dict:
         sym = coin["symbol"]
         if sym == "USDT":
             continue
-        ind = indicators([(r["ts"], r["price"]) for r in pts if r["symbol"] == sym], coin["price"])
+        sym_pts = [(r["ts"], r["price"]) for r in pts if r["symbol"] == sym]
+        ind = indicators(sym_pts, coin["price"])
         levels = [float(r["price"]) for r in lv_rows if r["symbol"] == sym]
         pr = plans.get(sym)
         plan = {k: (float(pr[k]) if pr[k] is not None else None) for k in ("t1", "t2", "stop")} if pr else None
@@ -533,8 +585,30 @@ async def snapshot(c) -> dict:
         coin["ind"] = ind
         coin["levels"] = levels
         coin["plan"] = {**plan, "created_at": pr["created_at"].isoformat()} if pr else None
-        coin["advice"] = sell_advice(coin, ind, plan, levels, prm, sold_since, max_close) if coin["price"] else None
-        cand = buy_candidate(coin, ind, levels, prm, usdt_coin["earn_apr"], capital, snap["usdt"]) if coin["price"] else None
+        strategy = coin["strategy"]
+        if not coin["price"]:
+            coin["advice"] = None
+            continue
+        if strategy == "dca":
+            # накопление: без продаж и без сигналов на покупку — только напоминание по графику (log_signals)
+            coin["advice"] = {"status": "hold", "title": "Накопление", "reasons": [
+                f"Покупка {_usd(coin['dca_amount'])} каждого {coin['dca_day']}-го — напоминание придёт в 12:00 МСК"
+                if coin["dca_amount"] > 0 else "Задайте сумму и день накопления в настройках монеты"]}
+            continue
+        coin["advice"] = sell_advice(coin, ind, plan, levels, prm, sold_since, max_close)
+        if strategy != "swing":
+            continue   # hold — продажи по плану, сигналов на покупку нет
+        # частота проверки входа: цена на последней плановой проверке (продажи — по закрытию дня)
+        eval_ind = ind
+        if ind and coin["check_hours"] < 24:
+            cp = _checkpoint(datetime.now(timezone.utc), coin["check_hours"])
+            p_cp = _price_at(sym_pts, cp)
+            if p_cp:
+                daily = cp.hour == DAY_SHIFT_H
+                eval_ind = dict(ind, close=p_cp, check_label=(
+                    f"Закрытие {ind['close_day']} 12:00 МСК: {_px(p_cp)}" if daily
+                    else f"Проверка {_msk(cp)} МСК (внутри дня, раз в {coin['check_hours']} ч): {_px(p_cp)}"))
+        cand = buy_candidate(coin, eval_ind, levels, prm, usdt_coin["earn_apr"], capital, snap["usdt"])
         if cand:
             cands.append(cand)
     usdt_coin["advice"] = buy_advice(cands, snap["usdt"], prm)
@@ -558,16 +632,33 @@ async def log_signals(c, snap) -> int:
             if last != key:
                 # повтор того же «Покупать X» в пределах паузы — в историю пишем,
                 # но в Telegram не шлём (sent = true сразу)
-                quiet = adv["status"] in ("buy", "buy_small") and bool(await c.fetchval(
+                # пауза — из настроек монеты, которую советуют купить (0 — без паузы)
+                cool = next((x["cooldown_days"] for x in snap["coins"] if x["symbol"] == adv.get("symbol")),
+                            int(snap["params"]["buy_cooldown_days"]))
+                quiet = adv["status"] in ("buy", "buy_small") and cool > 0 and bool(await c.fetchval(
                     "SELECT 1 FROM crypto.signals WHERE symbol = $1 AND key = $2 "
                     "AND ts > now() - make_interval(days => $3)",
-                    coin["symbol"], key, int(snap["params"]["buy_cooldown_days"])))
+                    coin["symbol"], key, int(cool)))
                 await c.execute(
                     "INSERT INTO crypto.signals (symbol, key, status, title, reasons, sent) "
                     "VALUES ($1, $2, $3, $4, $5, $6)",
                     coin["symbol"], key, adv["status"], adv["title"], adv["reasons"], quiet,
                 )
                 n += 1
+        # накопление: напоминание раз в месяц в dca_day-й день с 12:00 МСК
+        if coin.get("strategy") == "dca" and coin.get("dca_amount", 0) > 0:
+            msk = datetime.now(timezone.utc) + timedelta(hours=3)
+            if msk.day >= min(int(coin["dca_day"]), 28) and msk.hour >= 12:
+                key = f"dca:{msk:%Y-%m}"
+                if not await c.fetchval("SELECT 1 FROM crypto.signals WHERE symbol = $1 AND key = $2",
+                                        coin["symbol"], key):
+                    await c.execute(
+                        "INSERT INTO crypto.signals (symbol, key, status, title, reasons) VALUES ($1, $2, 'dca', $3, $4)",
+                        coin["symbol"], key, f"Накопление: купить {coin['symbol']} на {_usd(coin['dca_amount'])}",
+                        [f"По плану: каждый месяц {coin['dca_day']}-го",
+                         f"Монеты — в ядро (Earn {coin['earn_apr']:g}%), продавать не нужно",
+                         "После покупки внесите её в портал и увеличьте «Ядро, шт»"])
+                    n += 1
         ind = coin.get("ind")
         if not ind:
             continue
@@ -596,11 +687,11 @@ async def log_signals(c, snap) -> int:
     return n
 
 
-NOTIFY_ICONS = {"take": "🟡", "exit": "🔴", "buy": "🟢", "buy_small": "🔹", "noplan": "🔵", "event": "📏"}
-LOUD = ("take", "exit", "buy", "buy_small", "noplan")
+NOTIFY_ICONS = {"take": "🟡", "exit": "🔴", "buy": "🟢", "buy_small": "🔹", "noplan": "🔵", "event": "📏", "dca": "🟣"}
+LOUD = ("take", "exit", "buy", "buy_small", "noplan", "dca")
 
 
-def signal_message(sig, prev_status) -> str | None:
+def signal_message(sig, prev_status, delayed_from: str | None = None) -> str | None:
     """Текст Telegram-сообщения для строки crypto.signals; None — не отправлять
     (тихие переходы вроде «Держать» ↔ «нет позиции»)."""
     st, sym = sig["status"], sig["symbol"]
@@ -615,6 +706,8 @@ def signal_message(sig, prev_status) -> str | None:
     else:
         return None
     lines = [head] + [f"• {r}" for r in (sig["reasons"] or [])]
+    if delayed_from:
+        lines.append(f"⏰ Сигнал от {delayed_from} МСК, отправлен с задержкой (тихие часы) — проверьте актуальность")
     lines.append("\nПортал → Финансы → Крипто")
     return "\n".join(lines)
 

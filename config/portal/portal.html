@@ -6541,7 +6541,8 @@ function cryptoCardEl(c) {
       <div class="crypto-coin-ic" style="background:${CRYPTO_COLORS[c.symbol] || 'var(--surface3)'}">${isUsdt ? '$' : escapeHtml(c.symbol[0])}</div>
       <div class="vehicle-info">
         <div class="vehicle-name">${escapeHtml(c.symbol)}</div>
-        <div class="vehicle-sub">${escapeHtml(c.name)}</div>
+        <div class="vehicle-sub">${escapeHtml(c.name)}${isUsdt ? '' : ' · ' + ({ swing: 'свинг' + (c.check_hours < 24 ? ', раз в ' + c.check_hours + ' ч' : ''), hold: 'удержание', dca: 'накопление' }[c.strategy] || '')
+          + (c.quiet_from != null ? ` · 🌙 ${String(c.quiet_from).padStart(2, '0')}–${String(c.quiet_to).padStart(2, '0')}` : '')}</div>
       </div>
       ${priceHtml}
     </div>
@@ -6760,6 +6761,32 @@ function openCryptoForm(kind, symbol, suggest) {
       <div class="cf-hint">Для оценки в форме вывода: рыночный курс USDT/RUB минус этот %. В Д/К уходит сумма, которую вы впишете как факт.</div>` : `
       <label>Ядро, шт (не трогаем сигналами продажи)</label><input type="text" id="cfCore" inputmode="decimal" value="${c.core_qty}">
       <label>Комиссия + спред на сделку, %</label><input type="text" id="cfFee" inputmode="decimal" value="${c.fee_pct}">
+      <div class="section-label">Стратегия</div>
+      <select id="cfStrategy">
+        ${[['swing', 'Свинг у поддержки — сигналы на покупку и продажу'], ['hold', 'Удержание — без сигналов на покупку, продажи по плану'], ['dca', 'Накопление — напоминание купить по графику, без продаж']]
+          .map(([v, t]) => `<option value="${v}"${c.strategy === v ? ' selected' : ''}>${t}</option>`).join('')}
+      </select>
+      <div id="cfSwingBox" class="crypto-form">
+        <label>Проверка входа</label>
+        <select id="cfCheck">${[[1, 'каждый час'], [4, 'раз в 4 часа'], [6, 'раз в 6 часов'], [12, 'раз в 12 часов'], [24, 'раз в сутки (закрытие 12:00 МСК)']]
+          .map(([v, t]) => `<option value="${v}"${c.check_hours === v ? ' selected' : ''}>${t}</option>`).join('')}</select>
+        <label>Пауза между повторами сигнала на покупку</label>
+        <select id="cfCool">${[[0, 'без паузы'], [1, '1 день'], [3, '3 дня'], [7, '7 дней']]
+          .map(([v, t]) => `<option value="${v}"${c.cooldown_days === v ? ' selected' : ''}>${t}</option>`).join('')}</select>
+      </div>
+      <div id="cfDcaBox" class="crypto-form">
+        <div class="cf-row">
+          <input type="text" id="cfDcaAmt" inputmode="decimal" placeholder="сумма $" value="${c.dca_amount || ''}" title="Сумма покупки, $">
+          <input type="text" id="cfDcaDay" inputmode="numeric" placeholder="день 1–28" value="${c.dca_day || 25}" title="День месяца">
+        </div>
+        <div class="cf-hint">Напоминание «купить на $X» придёт в этот день в 12:00 МСК. Купленное — в ядро.</div>
+      </div>
+      <label class="cf-check"><input type="checkbox" id="cfQuietOn"${c.quiet_from != null ? ' checked' : ''}> Тихие часы — не присылать сообщения по монете</label>
+      <div class="cf-row" id="cfQuietBox">
+        <select id="cfQuietFrom">${Array.from({ length: 24 }, (_, h) => `<option value="${h}"${(c.quiet_from != null ? c.quiet_from : 23) === h ? ' selected' : ''}>с ${String(h).padStart(2, '0')}:00</option>`).join('')}</select>
+        <select id="cfQuietTo">${Array.from({ length: 24 }, (_, h) => `<option value="${h}"${(c.quiet_to != null ? c.quiet_to : 8) === h ? ' selected' : ''}>по ${String(h).padStart(2, '0')}:00</option>`).join('')}</select>
+      </div>
+      <div class="cf-hint" style="margin-top:-2px">По МСК. Сообщения не теряются — придут, когда окно закончится, с пометкой времени.</div>
       <div class="section-label">План торговой части${sug ? ' — предложен по совету' : ''}</div>
       <div class="cf-row">
         <input type="text" id="cfT1" inputmode="decimal" placeholder="T1" value="${pv(p.t1)}" title="T1 — фиксировать ⅓">
@@ -6769,7 +6796,18 @@ function openCryptoForm(kind, symbol, suggest) {
       <label class="cf-check"><input type="checkbox" id="cfRestart"${sug || !c.plan ? ' checked' : ''}> Новый план — счёт проданных третей с нуля</label>
       <label>Уровни поддержки / сопротивления, через пробел</label>
       <input type="text" id="cfLevels" value="${(c.levels || []).slice().sort((a, b) => b - a).map(v => +v.toFixed(5)).join(' ')}">
-      <div class="cf-hint">T1/T2/стоп пустые — план удаляется. Стоп и цели срабатывают по дневному закрытию (UTC).</div>`}`;
+      <div class="cf-hint">T1/T2/стоп пустые — план удаляется. Стоп и цели срабатывают по дневному закрытию (12:00 МСК).</div>`}`;
+    if (symbol !== 'USDT') {
+      const sync = () => {
+        const s = document.getElementById('cfStrategy').value;
+        document.getElementById('cfSwingBox').style.display = s === 'swing' ? '' : 'none';
+        document.getElementById('cfDcaBox').style.display = s === 'dca' ? '' : 'none';
+        document.getElementById('cfQuietBox').style.display = document.getElementById('cfQuietOn').checked ? '' : 'none';
+      };
+      document.getElementById('cfStrategy').onchange = sync;
+      document.getElementById('cfQuietOn').onchange = sync;
+      sync();
+    }
   }
   document.getElementById('cryptoModalErr').textContent = '';
   document.getElementById('cryptoSaveBtn').disabled = false;
@@ -6868,6 +6906,21 @@ async function saveCryptoForm() {
     const body = { earn_apr: parseNum(val('cfApr')) };
     if (symbol !== 'USDT') { body.core_qty = parseNum(val('cfCore')); body.fee_pct = parseNum(val('cfFee')); }
     if (Object.values(body).some(v => v == null || v < 0)) { err.textContent = 'Нужны числа ≥ 0'; return; }
+    if (symbol !== 'USDT') {
+      body.strategy = val('cfStrategy');
+      body.check_hours = +val('cfCheck');
+      body.cooldown_days = +val('cfCool');
+      if (body.strategy === 'dca') {
+        body.dca_amount = parseNum(val('cfDcaAmt'));
+        body.dca_day = parseInt(val('cfDcaDay'), 10);
+        if (!(body.dca_amount > 0)) { err.textContent = 'Накопление: укажите сумму'; return; }
+        if (!(body.dca_day >= 1 && body.dca_day <= 28)) { err.textContent = 'Накопление: день с 1 по 28'; return; }
+      }
+      if (document.getElementById('cfQuietOn').checked) {
+        body.quiet_from = +val('cfQuietFrom'); body.quiet_to = +val('cfQuietTo');
+        if (body.quiet_from === body.quiet_to) { err.textContent = 'Тихие часы: «с» и «по» не должны совпадать'; return; }
+      } else body.quiet = false;
+    }
     reqs.push(['/crypto/assets/' + symbol, 'PATCH', body]);
     if (symbol === 'USDT') {
       const fee = parseNum(val('cfFiatFee'));
