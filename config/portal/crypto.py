@@ -12,7 +12,8 @@
   entry = cost / (qty − earn_qty) — средняя цена ПОКУПКИ, начисления Earn её не портят;
   P&L   = qty·price − cost — уже включает доход от Earn.
 
-Советы (snapshot) — формулы по дневным свечам UTC. Правила «по закрытию»
+Советы (snapshot) — формулы по дневным свечам; торговый день 12:00–12:00 МСК
+(DAY_SHIFT_H), не UTC-полночь — решение приходит днём. Правила «по закрытию»
 смотрят только на закрытые дни, живая цена — лишь для пометок «ждём закрытия».
   Продажа (торговая часть = qty − ядро, от min_position_usd):
     закрытие < стоп                → выход
@@ -200,11 +201,26 @@ async def portfolio(c) -> dict:
 
 
 # ── индикаторы ────────────────────────────────────────────────
+# Торговый день — с 12:00 до 12:00 МСК (09:00 UTC), а не по UTC-полуночи:
+# решение по закрытию дня приходит днём, когда по нему можно сразу действовать,
+# а не в 03:00 ночи. Свеча «день D» = [D 09:00 UTC, D+1 09:00 UTC).
+DAY_SHIFT_H = 9
+
+
+def _tday(ts) -> "date":
+    """Торговый день, к которому относится момент ts."""
+    return (ts.astimezone(timezone.utc) - timedelta(hours=DAY_SHIFT_H)).date()
+
+
+def _today():
+    return _tday(datetime.now(timezone.utc))
+
+
 def _candles(points) -> list[dict]:
-    """Дневные свечи UTC из точек (ts, price) в хронологическом порядке."""
+    """Дневные свечи (торговый день 12:00–12:00 МСК) из точек (ts, price) по времени."""
     out = []
     for ts, p in points:
-        d = ts.astimezone(timezone.utc).date()
+        d = _tday(ts)
         if out and out[-1]["day"] == d:
             c = out[-1]
             c["high"] = max(c["high"], p)
@@ -235,7 +251,7 @@ def _sma(closes, n):
 
 
 def indicators(points, price) -> dict | None:
-    today = datetime.now(timezone.utc).date()
+    today = _today()
     closed = [c for c in _candles(points) if c["day"] < today]
     if len(closed) < 2 or price is None:
         return None
@@ -262,7 +278,7 @@ def indicators(points, price) -> dict | None:
         "ma200": ma200,
         "ma200_cross": cross,
         "close": C[-1],                       # последнее дневное закрытие
-        "close_day": closed[-1]["day"].isoformat(),
+        "close_day": (closed[-1]["day"] + timedelta(days=1)).isoformat(),   # дата закрытия (в 12:00 МСК)
         "prev_close": C[-2],
         "week_close": sundays[-1]["close"] if sundays else None,
         "rsi": _rsi(C + [price]),             # живой RSI (с текущей ценой) — для показа
@@ -433,7 +449,7 @@ def buy_candidate(coin, ind, levels, prm, usdt_apr, capital, usdt) -> dict | Non
     goal_s = (f"цель T1 {_px(R1)} (ход {atr / p * 100:.1f}%/день — до T2 {_px(R2)} не считаем)" if low_vol
               else f"цели {_px(R1)} / {_px(R2)}")
     reasons = [
-        f"Закрытие {ind['close_day']}: {_px(p)}",
+        f"Закрытие {ind['close_day']} 12:00 МСК: {_px(p)}",
         f"{mark(rr and rr >= rr_need)} R:R {rr:.1f} (нужно ≥ {rr_need:g}): стоп {_px(stop)}, {goal_s}" if rr
         else f"✗ Закрытие ниже расчётного стопа {_px(stop)}",
         f"{mark(near)} Зона входа {_px(S)}–{_px(zone_hi)} (поддержка + {prm['near_atr']:g}·ATR)"
@@ -510,9 +526,9 @@ async def snapshot(c) -> dict:
                 "SELECT COALESCE(sum(qty), 0) FROM crypto.trades WHERE symbol = $1 AND side = 'sell' AND created_at >= $2",
                 sym, pr["created_at"]))
             if ind:
-                day0 = pr["created_at"].astimezone(timezone.utc).date()
+                day0 = _tday(pr["created_at"])
                 closes = [cd["close"] for cd in _candles([(r["ts"], r["price"]) for r in pts if r["symbol"] == sym])
-                          if day0 <= cd["day"] < datetime.now(timezone.utc).date()]
+                          if day0 <= cd["day"] < _today()]
                 max_close = max(closes) if closes else ind["close"]
         coin["ind"] = ind
         coin["levels"] = levels

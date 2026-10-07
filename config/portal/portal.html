@@ -6398,7 +6398,7 @@ function cryptoMountCharts() {
     const days = +cryptoPref('days', '90');
     wrap.innerHTML = `
       <div class="crypto-chart-bar">
-        <span class="lbl">График · дни (UTC)</span>
+        <span class="lbl">График · день с 12:00 МСК</span>
         ${open ? [30, 90].map(d => `<button class="cc-chip${d === days ? ' active' : ''}" data-days="${d}">${d}д</button>`).join('') : ''}
         ${open ? '<button class="cc-btn cc-fs" title="На весь экран"><i class="ti ti-arrows-maximize"></i></button>' : ''}
         <button class="cc-btn cc-toggle" title="${open ? 'Свернуть' : 'Показать график'}"><i class="ti ti-chevron-${open ? 'up' : 'down'}"></i></button>
@@ -6420,7 +6420,7 @@ function cryptoMountCharts() {
 
 async function openCryptoFs(sym, days) {
   const c = cryptoCoin(sym);
-  document.getElementById('cryptoFsTitle').textContent = sym + ' · дневные свечи (UTC)';
+  document.getElementById('cryptoFsTitle').textContent = sym + ' · дневные свечи (с 12:00 МСК)';
   const box = document.getElementById('cryptoFsBox');
   const chips = document.getElementById('cryptoFsChips');
   chips.innerHTML = [30, 90, 365].map(d => `<button class="cc-chip${d === days ? ' active' : ''}" data-days="${d}">${d}д</button>`).join(' ');
@@ -6596,7 +6596,7 @@ function cryptoIndHtml(c) {
       ${cell('ATR (ход/день)', (i.atr / c.price * 100).toFixed(1) + '%')}
     </div>
     <div class="crypto-plan-line">
-      ${cross}Закрытие ${fmtDateRu(i.close_day)}: <b>${px(i.close)}</b> · поддержка <b>${px(sup)}</b> · сопротивление <b>${px(res)}</b><br>
+      ${cross}Закрытие ${fmtDateRu(i.close_day)} 12:00: <b>${px(i.close)}</b> · поддержка <b>${px(sup)}</b> · сопротивление <b>${px(res)}</b><br>
       ${planStr}
     </div>`;
 }
