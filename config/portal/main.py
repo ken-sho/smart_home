@@ -1969,6 +1969,7 @@ class CryptoAssetPatch(BaseModel):
     quiet: bool | None = None          # False — снять тихие часы
     quiet_from: int | None = None      # 0..23 МСК
     quiet_to: int | None = None
+    move_alert_pct: float | None = None   # 0 — выкл.
 
 
 def to_crypto_trade(r) -> dict:
@@ -2302,6 +2303,8 @@ async def update_crypto_asset(symbol: str, a: CryptoAssetPatch):
         raise HTTPException(400, "Проверка входа: 1, 4, 6, 12 или 24 часа")
     if "cooldown_days" in fields and fields["cooldown_days"] > 30:
         raise HTTPException(400, "Пауза — не больше 30 дней")
+    if "move_alert_pct" in fields and fields["move_alert_pct"] > 50:
+        raise HTTPException(400, "Порог резкого движения — до 50%")
     if "dca_day" in fields and not 1 <= fields["dca_day"] <= 28:
         raise HTTPException(400, "День накопления — с 1 по 28")
     for k in ("quiet_from", "quiet_to"):

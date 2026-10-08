@@ -197,6 +197,7 @@ async def portfolio(c) -> dict:
             "dca_day": a["dca_day"],
             "quiet_from": a["quiet_from"],
             "quiet_to": a["quiet_to"],
+            "move_alert_pct": float(a["move_alert_pct"]),
             "price": price,
             "price_ts": ts,
             "change_24h": (price / price_24h - 1) * 100 if price and price_24h else None,
@@ -511,7 +512,7 @@ def buy_candidate(coin, ind, levels, prm, usdt_apr, capital, usdt) -> dict | Non
     if real < usdt_apr:
         reasons.append(f"Earn {coin['earn_apr']:g}% − инфляция {coin['inflation']:g}% = {real:.1f}% < USDT {usdt_apr:g}% — порог R:R выше")
     return {
-        "symbol": coin["symbol"], "ok": ok, "small": small, "rr": rr, "rr_need": rr_need,
+        "symbol": coin["symbol"], "ok": ok, "small": small, "rr": rr, "rr_need": rr_need, "price": p,
         "amount_small": amount * prm["small_size"],
         "amount": amount, "zone": [S, zone_hi],
         "plan": {"t1": R1, "t2": R2, "stop": stop},
@@ -529,7 +530,7 @@ def buy_advice(cands, usdt, prm) -> dict:
         if small:
             s = small[0]
             return {
-                "status": "buy_small", "symbol": s["symbol"],
+                "status": "buy_small", "symbol": s["symbol"], "zone": s["zone"],
                 "title": f"Малый вход: {s['symbol']} на {_usd(s['amount_small'])}",
                 "reasons": [
                     f"R:R {s['rr']:.1f} ниже порога {s['rr_need']:g} — половина обычного размера",
@@ -540,7 +541,7 @@ def buy_advice(cands, usdt, prm) -> dict:
         return {"status": "wait", "title": "Ждать", "reasons": [], "candidates": cands}
     b = good[0]
     return {
-        "status": "buy", "symbol": b["symbol"],
+        "status": "buy", "symbol": b["symbol"], "zone": b["zone"],
         "title": f"Покупать {b['symbol']} на {_usd(b['amount'])}",
         "reasons": [f"План: T1 {_px(b['plan']['t1'])}, T2 {_px(b['plan']['t2'])}, стоп {_px(b['plan']['stop'])}"],
         "candidates": cands,
@@ -569,6 +570,12 @@ async def snapshot(c) -> dict:
             continue
         sym_pts = [(r["ts"], r["price"]) for r in pts if r["symbol"] == sym]
         ind = indicators(sym_pts, coin["price"])
+        # диапазон последних 24 ч — для алерта на резкое движение
+        day_ago = datetime.now(timezone.utc) - timedelta(hours=24)
+        last24 = [(t, p) for t, p in sym_pts if t >= day_ago]
+        if last24:
+            hi = max(last24, key=lambda x: x[1]); lo = min(last24, key=lambda x: x[1])
+            coin["range24"] = {"hi": hi[1], "hi_at": hi[0], "lo": lo[1], "lo_at": lo[0], "price": last24[-1][1]}
         levels = [float(r["price"]) for r in lv_rows if r["symbol"] == sym]
         pr = plans.get(sym)
         plan = {k: (float(pr[k]) if pr[k] is not None else None) for k in ("t1", "t2", "stop")} if pr else None
@@ -597,7 +604,12 @@ async def snapshot(c) -> dict:
             continue
         coin["advice"] = sell_advice(coin, ind, plan, levels, prm, sold_since, max_close)
         if strategy != "swing":
-            continue   # hold — продажи по плану, сигналов на покупку нет
+            # hold — продажи по плану, сигналов на покупку нет; разбор показываем для справки
+            cand = buy_candidate(coin, ind, levels, prm, usdt_coin["earn_apr"], capital, snap["usdt"])
+            if cand:
+                cand.update(ok=False, small=False, hold=True)
+                cands.append(cand)
+            continue
         # частота проверки входа: цена на последней плановой проверке (продажи — по закрытию дня)
         eval_ind = ind
         if ind and coin["check_hours"] < 24:
@@ -625,10 +637,26 @@ async def log_signals(c, snap) -> int:
         adv = coin.get("advice")
         if adv:
             key = adv["status"] + (":" + adv["symbol"] if adv.get("symbol") else "")
-            last = await c.fetchval(
-                "SELECT key FROM crypto.signals WHERE symbol = $1 AND status <> 'event' "
+            last_row = await c.fetchrow(
+                "SELECT key, status, data FROM crypto.signals WHERE symbol = $1 "
+                "AND status NOT IN ('event', 'move', 'dca') "
                 "ORDER BY ts DESC, id DESC LIMIT 1", coin["symbol"]
             )
+            last = last_row["key"] if last_row else None
+            status, title, reasons = adv["status"], adv["title"], adv["reasons"]
+            # «Покупать» сменилось на «Ждать», потому что цена ушла НИЖЕ зоны входа (пробой
+            # поддержки) — это важно, сообщаем; обычный выход из зоны вверх остаётся тихим
+            if (last != key and status == "wait" and last_row and last_row["status"] in ("buy", "buy_small")
+                    and last_row["data"] and last_row["data"].get("zone")):
+                sym_b = last_row["key"].split(":", 1)[1]
+                cand = next((k for k in adv.get("candidates", []) if k["symbol"] == sym_b), None)
+                low = last_row["data"]["zone"][0]
+                if cand and cand.get("price") is not None and cand["price"] < low:
+                    what = "Малый вход" if last_row["status"] == "buy_small" else "Покупка"
+                    status = "cancel"
+                    title = f"{what} по {sym_b} отменён: цена {_px(cand['price'])} ниже поддержки {_px(low)}"
+                    reasons = ["Поддержка пробита — по правилам это слом, а не вход",
+                               "Если уже купили по сигналу — стоп из плана остаётся в силе"]
             if last != key:
                 # повтор того же «Покупать X» в пределах паузы — в историю пишем,
                 # но в Telegram не шлём (sent = true сразу)
@@ -640,10 +668,35 @@ async def log_signals(c, snap) -> int:
                     "AND ts > now() - make_interval(days => $3)",
                     coin["symbol"], key, int(cool)))
                 await c.execute(
-                    "INSERT INTO crypto.signals (symbol, key, status, title, reasons, sent) "
-                    "VALUES ($1, $2, $3, $4, $5, $6)",
-                    coin["symbol"], key, adv["status"], adv["title"], adv["reasons"], quiet,
+                    "INSERT INTO crypto.signals (symbol, key, status, title, reasons, sent, data) "
+                    "VALUES ($1, $2, $3, $4, $5, $6, $7)",
+                    coin["symbol"], key, status, title, reasons, quiet,
+                    {"zone": adv["zone"]} if adv.get("zone") else None,
                 )
+                n += 1
+        # резкое движение за 24 ч (информация, не совет): от максимума вниз / от минимума вверх
+        r24, pct = coin.get("range24"), coin.get("move_alert_pct", 0)
+        if r24 and pct > 0:
+            p = r24["price"]
+            for direction, ref, ref_at, chg in (("down", r24["hi"], r24["hi_at"], (p / r24["hi"] - 1) * 100),
+                                                 ("up", r24["lo"], r24["lo_at"], (p / r24["lo"] - 1) * 100)):
+                if (direction == "down" and chg > -pct) or (direction == "up" and chg < pct):
+                    continue
+                if await c.fetchval(
+                        "SELECT 1 FROM crypto.signals WHERE symbol = $1 AND status = 'move' "
+                        "AND key LIKE $2 AND ts > now() - interval '12 hours'", coin["symbol"], f"move:{direction}:%"):
+                    continue
+                arrow = "📉" if direction == "down" else "📈"
+                usdt_adv = next((x.get("advice") for x in snap["coins"] if x["symbol"] == "USDT"), None) or {}
+                cur = coin.get("advice") or {}
+                await c.execute(
+                    "INSERT INTO crypto.signals (symbol, key, status, title, reasons) VALUES ($1, $2, 'move', $3, $4)",
+                    coin["symbol"], f"move:{direction}:{datetime.now(timezone.utc):%Y%m%d%H}",
+                    f"{arrow} {coin['symbol']} {chg:+.1f}% за 24 ч: {_px(ref)} → {_px(p)}",
+                    [f"{'Максимум' if direction == 'down' else 'Минимум'} {_px(ref)} в {_msk(ref_at)} МСК",
+                     "Это информация о движении, не совет",
+                     f"Совет по позиции: {cur.get('title', '—')}",
+                     f"Совет на покупку: {usdt_adv.get('title', '—')}"])
                 n += 1
         # накопление: напоминание раз в месяц в dca_day-й день с 12:00 МСК
         if coin.get("strategy") == "dca" and coin.get("dca_amount", 0) > 0:
@@ -687,8 +740,9 @@ async def log_signals(c, snap) -> int:
     return n
 
 
-NOTIFY_ICONS = {"take": "🟡", "exit": "🔴", "buy": "🟢", "buy_small": "🔹", "noplan": "🔵", "event": "📏", "dca": "🟣"}
-LOUD = ("take", "exit", "buy", "buy_small", "noplan", "dca")
+NOTIFY_ICONS = {"take": "🟡", "exit": "🔴", "buy": "🟢", "buy_small": "🔹", "noplan": "🔵", "event": "📏",
+                "dca": "🟣", "cancel": "⚪"}
+LOUD = ("take", "exit", "buy", "buy_small", "noplan", "dca", "cancel")
 
 
 def signal_message(sig, prev_status, delayed_from: str | None = None) -> str | None:
@@ -698,6 +752,8 @@ def signal_message(sig, prev_status, delayed_from: str | None = None) -> str | N
     who = "Покупка" if sym == "USDT" else sym
     if st == "event":
         head = f"📏 {sym}: {sig['title']}"
+    elif st == "move":
+        head = sig["title"]   # заголовок уже содержит стрелку 📉/📈 и монету
     elif st in LOUD:
         head = f"{NOTIFY_ICONS[st]} {who}: {sig['title']}"
     elif prev_status in ("take", "exit"):

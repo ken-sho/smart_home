@@ -70,6 +70,9 @@ ALTER TABLE crypto.assets ADD COLUMN IF NOT EXISTS dca_day       smallint      N
 --   откладываются до конца окна (NULL — без тишины). Окно может переходить через полночь.
 ALTER TABLE crypto.assets ADD COLUMN IF NOT EXISTS quiet_from    smallint;
 ALTER TABLE crypto.assets ADD COLUMN IF NOT EXISTS quiet_to      smallint;
+--   move_alert_pct — алерт на резкое движение: цена отошла от максимума/минимума
+--   последних 24 ч на столько % (0 — выключено). Информационный, не совет.
+ALTER TABLE crypto.assets ADD COLUMN IF NOT EXISTS move_alert_pct numeric(5,2) NOT NULL DEFAULT 0;
 
 -- ── История цен ───────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS crypto.prices (
@@ -175,6 +178,9 @@ CREATE TABLE IF NOT EXISTS crypto.signals (
 );
 
 CREATE INDEX IF NOT EXISTS idx_signals_symbol ON crypto.signals (symbol, ts DESC);
+
+-- служебные данные сигнала (зона входа у «Покупать» — чтобы понять, что её пробили вниз)
+ALTER TABLE crypto.signals ADD COLUMN IF NOT EXISTS data jsonb;
 
 -- ── updated_at автоматика ─────────────────────────────────────
 CREATE OR REPLACE FUNCTION crypto.trg_touch()

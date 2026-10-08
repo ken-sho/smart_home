@@ -6542,6 +6542,7 @@ function cryptoCardEl(c) {
       <div class="vehicle-info">
         <div class="vehicle-name">${escapeHtml(c.symbol)}</div>
         <div class="vehicle-sub">${escapeHtml(c.name)}${isUsdt ? '' : ' · ' + ({ swing: 'свинг' + (c.check_hours < 24 ? ', раз в ' + c.check_hours + ' ч' : ''), hold: 'удержание', dca: 'накопление' }[c.strategy] || '')
+          + (c.move_alert_pct > 0 ? ` · ⚡${+c.move_alert_pct}%` : '')
           + (c.quiet_from != null ? ` · 🌙 ${String(c.quiet_from).padStart(2, '0')}–${String(c.quiet_to).padStart(2, '0')}` : '')}</div>
       </div>
       ${priceHtml}
@@ -6562,7 +6563,7 @@ function cryptoAdviceHtml(c) {
   let extra = '';
   if (c.symbol === 'USDT' && a.candidates && a.status !== 'none') {
     extra = a.candidates.map(k => `
-      <details class="crypto-cand"><summary>${escapeHtml(k.symbol)} — ${k.ok ? 'проходит' : (k.small ? 'малый вход' : 'не сейчас')}${k.rr != null ? ` · R:R ${k.rr.toFixed(1)} / нужно ${k.rr_need}` : ''} · зона ${k.zone.map(v => v.toFixed(4)).join('–')}</summary>
+      <details class="crypto-cand"><summary>${escapeHtml(k.symbol)} — ${k.hold ? 'удержание, сигналов нет' : (k.ok ? 'проходит' : (k.small ? 'малый вход' : 'не сейчас'))}${k.rr != null ? ` · R:R ${k.rr.toFixed(1)} / нужно ${k.rr_need}` : ''} · зона ${k.zone.map(v => v.toFixed(4)).join('–')}</summary>
         ${li(k.reasons)}
       </details>`).join('');
   }
@@ -6781,6 +6782,8 @@ function openCryptoForm(kind, symbol, suggest) {
         </div>
         <div class="cf-hint">Напоминание «купить на $X» придёт в этот день в 12:00 МСК. Купленное — в ядро.</div>
       </div>
+      <label>Алерт на резкое движение: % от максимума/минимума за 24 ч (0 — выкл.)</label>
+      <input type="text" id="cfMove" inputmode="decimal" value="${c.move_alert_pct || 0}">
       <label class="cf-check"><input type="checkbox" id="cfQuietOn"${c.quiet_from != null ? ' checked' : ''}> Тихие часы — не присылать сообщения по монете</label>
       <div class="cf-row" id="cfQuietBox">
         <select id="cfQuietFrom">${Array.from({ length: 24 }, (_, h) => `<option value="${h}"${(c.quiet_from != null ? c.quiet_from : 23) === h ? ' selected' : ''}>с ${String(h).padStart(2, '0')}:00</option>`).join('')}</select>
@@ -6910,6 +6913,8 @@ async function saveCryptoForm() {
       body.strategy = val('cfStrategy');
       body.check_hours = +val('cfCheck');
       body.cooldown_days = +val('cfCool');
+      body.move_alert_pct = parseNum(val('cfMove')) || 0;
+      if (body.move_alert_pct < 0 || body.move_alert_pct > 50) { err.textContent = 'Порог резкого движения — от 0 до 50%'; return; }
       if (body.strategy === 'dca') {
         body.dca_amount = parseNum(val('cfDcaAmt'));
         body.dca_day = parseInt(val('cfDcaDay'), 10);
