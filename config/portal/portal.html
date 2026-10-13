@@ -1209,6 +1209,12 @@ input[type=number]:focus { border-color: var(--accent); }
 }
 .crypto-total-val { font-size: 20px; font-weight: 600; font-family: var(--mono); }
 .crypto-total-sub { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 4px; font-size: 11px; color: var(--text2); font-family: var(--mono); }
+.crypto-mix { margin-top: 9px; }
+.crypto-mix-bar { display: flex; gap: 2px; height: 6px; border-radius: 3px; overflow: hidden; }
+.crypto-mix-bar > div { min-width: 3px; }
+.crypto-mix-legend { display: flex; flex-wrap: wrap; gap: 3px 12px; margin-top: 6px; font-size: 11px; color: var(--text2); font-family: var(--mono); }
+.crypto-mix-legend i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 4px; vertical-align: 0; }
+.crypto-mix-legend b { color: var(--text); font-weight: 600; }
 .crypto-coin-ic {
   width: 28px; height: 28px; border-radius: 50%; flex-shrink: 0;
   display: flex; align-items: center; justify-content: center;
@@ -1268,6 +1274,7 @@ input[type=number]:focus { border-color: var(--accent); }
 #panel-finance.amounts-hidden #cryptoMeta,
 #panel-finance.amounts-hidden .crypto-total-val,
 #panel-finance.amounts-hidden .crypto-total-sub b,
+#panel-finance.amounts-hidden .crypto-mix-legend b,
 #panel-finance.amounts-hidden .crypto-stats .crypto-stat-val,
 #panel-finance.amounts-hidden .crypto-row-amt,
 #panel-finance.amounts-hidden .crypto-adv li,
@@ -6474,6 +6481,7 @@ function renderCrypto() {
         <span>P&amp;L монет <b class="${upDown(pnl)}">${fmtUsdSigned(pnl)}</b></span>
         <span>Earn ≈ <b class="c-up">${fmtUsd(earn)}</b>/мес</span>
       </div>
+      ${cryptoMixHtml(coins, total)}
     </div>`;
   el.querySelectorAll('.crypto-actions button').forEach(b => b.onclick = () => openCryptoForm(b.dataset.act));
 
@@ -6508,6 +6516,15 @@ function renderCrypto() {
     return;
   }
   rows.forEach(r => el.appendChild(cryptoRowEl(r)));
+}
+
+// состав портфеля: полоса долей + подписи (цвета — как значки монет)
+function cryptoMixHtml(coins, total) {
+  const parts = coins.filter(c => (c.value || 0) > 0.5).sort((a, b) => b.value - a.value);
+  if (!parts.length || total <= 0) return '';
+  const bar = parts.map(c => `<div style="flex:${c.value};background:${CRYPTO_COLORS[c.symbol] || 'var(--surface3)'}" title="${escapeHtml(c.symbol)}"></div>`).join('');
+  const legend = parts.map(c => `<span><i style="background:${CRYPTO_COLORS[c.symbol] || 'var(--surface3)'}"></i>${escapeHtml(c.symbol)} <b>${fmtUsd(c.value)}</b> · ${(c.value / total * 100).toFixed(0)}%</span>`).join('');
+  return `<div class="crypto-mix"><div class="crypto-mix-bar">${bar}</div><div class="crypto-mix-legend">${legend}</div></div>`;
 }
 
 function cryptoCardEl(c) {
