@@ -40,6 +40,7 @@
   стоп ≥ 2·ATR от входа — главный вклад (без него стопы выбивает шум);
   авто-уровни из локальных экстремумов ухудшали результат — не используем.
 """
+import re
 import json
 import asyncio
 import urllib.request
@@ -239,14 +240,28 @@ def _checkpoint(now, every_h: int):
 
 
 def _price_at(points, t):
-    """Цена на момент проверки: последняя точка не позже t + 15 мин (сбор цен в :05)."""
-    limit = t + timedelta(minutes=15)
+    """Цена на момент проверки: последняя точка в окне [t − 5 мин, t + 15 мин] (сбор цен в :05).
+    None — цена этого часа ещё не собрана (тогда действует предыдущая проверка)."""
+    lo, hi = t - timedelta(minutes=5), t + timedelta(minutes=15)
     last = None
     for ts, p in points:
-        if ts > limit:
+        if ts > hi:
             break
-        last = p
+        if ts >= lo:
+            last = p
     return last
+
+
+def _checkpoint_price(points, now, every_h):
+    """(момент проверки, цена) — последняя проверка, для которой цена уже собрана.
+    Без этого запрос в 12:00:10 брал цену 11:03, а в 12:05 — свежую, и совет переворачивался."""
+    cp = _checkpoint(now, every_h)
+    for _ in range(3):
+        p = _price_at(points, cp)
+        if p is not None:
+            return cp, p
+        cp -= timedelta(hours=every_h)
+    return None, None
 
 
 def _msk(t) -> str:
@@ -520,17 +535,29 @@ def buy_candidate(coin, ind, levels, prm, usdt_apr, capital, usdt) -> dict | Non
     }
 
 
-def buy_advice(cands, usdt, prm) -> dict:
+def buy_advice(cands, usdt, prm, filled: dict | None = None) -> dict:
+    """filled = {"symbol", "total", "date"} — рекомендацию по этой монете уже исполнили:
+    пока монета остаётся в зоне входа, повторно её не советуем («исполнено»)."""
+    fs = filled["symbol"] if filled else None
+    filled_eligible = any(c["symbol"] == fs and (c["ok"] or c.get("small")) for c in cands)
     if usdt < prm["min_usdt"]:
         return {"status": "none", "title": f"Свободных USDT меньше {_usd(prm['min_usdt'])}", "reasons": [], "candidates": cands}
-    good = sorted([c for c in cands if c["ok"]], key=lambda c: -c["rr"])
+    good = sorted([c for c in cands if c["ok"] and c["symbol"] != fs], key=lambda c: -c["rr"])
     if not good:
-        small = sorted([c for c in cands if c.get("small") and c["amount_small"] >= prm["min_usdt"]],
-                       key=lambda c: -c["rr"])
+        small = sorted([c for c in cands if c.get("small") and c["amount_small"] >= prm["min_usdt"]
+                        and c["symbol"] != fs], key=lambda c: -c["rr"])
+        if not small and filled_eligible:
+            return {
+                "status": "filled", "symbol": fs,
+                "title": f"Вход по {fs} исполнен — ждём следующего сигнала",
+                "reasons": [f"Куплено {filled['date']} на {_usd(filled['total'])}",
+                            f"Новый сигнал по {fs} — после выхода цены из зоны и повторного входа в неё"],
+                "candidates": cands,
+            }
         if small:
             s = small[0]
             return {
-                "status": "buy_small", "symbol": s["symbol"], "zone": s["zone"],
+                "status": "buy_small", "symbol": s["symbol"], "zone": s["zone"], "amount": s["amount_small"],
                 "title": f"Малый вход: {s['symbol']} на {_usd(s['amount_small'])}",
                 "reasons": [
                     f"R:R {s['rr']:.1f} ниже порога {s['rr_need']:g} — половина обычного размера",
@@ -541,11 +568,44 @@ def buy_advice(cands, usdt, prm) -> dict:
         return {"status": "wait", "title": "Ждать", "reasons": [], "candidates": cands}
     b = good[0]
     return {
-        "status": "buy", "symbol": b["symbol"], "zone": b["zone"],
+        "status": "buy", "symbol": b["symbol"], "zone": b["zone"], "amount": b["amount"],
         "title": f"Покупать {b['symbol']} на {_usd(b['amount'])}",
         "reasons": [f"План: T1 {_px(b['plan']['t1'])}, T2 {_px(b['plan']['t2'])}, стоп {_px(b['plan']['stop'])}"],
         "candidates": cands,
     }
+
+
+async def _filled_buy(c) -> dict | None:
+    """Исполнена ли действующая рекомендация на покупку:
+    - последний совет по USDT — «Покупать/Малый вход X», и после него записана покупка X
+      (не «вне кассы») хотя бы на половину рекомендованной суммы; или
+    - последний совет уже «исполнено X» (держится, пока X остаётся в зоне — см. buy_advice)."""
+    last = await c.fetchrow(
+        "SELECT key, status, ts, title, data FROM crypto.signals WHERE symbol = 'USDT' "
+        "AND status NOT IN ('event', 'move', 'dca') ORDER BY ts DESC, id DESC LIMIT 1")
+    if not last or ":" not in last["key"]:
+        return None
+    sym = last["key"].split(":", 1)[1]
+    if last["status"] == "filled":
+        since = await c.fetchval(
+            "SELECT ts FROM crypto.signals WHERE symbol = 'USDT' AND status IN ('buy', 'buy_small') "
+            "AND key LIKE $1 ORDER BY ts DESC LIMIT 1", f"%:{sym}")
+        min_total = 0
+    elif last["status"] in ("buy", "buy_small"):
+        since = last["ts"]
+        rec = (last["data"] or {}).get("amount")
+        if rec is None:   # сигналы до этой версии — сумма только в заголовке «… на $221.96»
+            m = re.search(r"\$([\d\s,.]+)", last["title"])
+            rec = float(m.group(1).replace(" ", "").replace(",", "")) if m else 0
+        min_total = 0.5 * rec
+    else:
+        return None
+    t = await c.fetchrow(
+        "SELECT total, date FROM crypto.trades WHERE symbol = $1 AND side = 'buy' AND NOT external "
+        "AND created_at > $2 AND total >= $3 ORDER BY created_at DESC LIMIT 1", sym, since, min_total)
+    if not t:
+        return None
+    return {"symbol": sym, "total": float(t["total"]), "date": t["date"].strftime("%d.%m")}
 
 
 async def snapshot(c) -> dict:
@@ -613,8 +673,7 @@ async def snapshot(c) -> dict:
         # частота проверки входа: цена на последней плановой проверке (продажи — по закрытию дня)
         eval_ind = ind
         if ind and coin["check_hours"] < 24:
-            cp = _checkpoint(datetime.now(timezone.utc), coin["check_hours"])
-            p_cp = _price_at(sym_pts, cp)
+            cp, p_cp = _checkpoint_price(sym_pts, datetime.now(timezone.utc), coin["check_hours"])
             if p_cp:
                 daily = cp.hour == DAY_SHIFT_H
                 eval_ind = dict(ind, close=p_cp, check_label=(
@@ -623,7 +682,7 @@ async def snapshot(c) -> dict:
         cand = buy_candidate(coin, eval_ind, levels, prm, usdt_coin["earn_apr"], capital, snap["usdt"])
         if cand:
             cands.append(cand)
-    usdt_coin["advice"] = buy_advice(cands, snap["usdt"], prm)
+    usdt_coin["advice"] = buy_advice(cands, snap["usdt"], prm, await _filled_buy(c))
     snap["params"] = prm
     return snap
 
@@ -671,7 +730,7 @@ async def log_signals(c, snap) -> int:
                     "INSERT INTO crypto.signals (symbol, key, status, title, reasons, sent, data) "
                     "VALUES ($1, $2, $3, $4, $5, $6, $7)",
                     coin["symbol"], key, status, title, reasons, quiet,
-                    {"zone": adv["zone"]} if adv.get("zone") else None,
+                    {"zone": adv["zone"], "amount": adv.get("amount")} if adv.get("zone") else None,
                 )
                 n += 1
         # резкое движение за 24 ч (информация, не совет): от максимума вниз / от минимума вверх
