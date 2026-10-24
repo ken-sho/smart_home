@@ -68,6 +68,7 @@ DEFAULT_PARAMS = {
     "buy_cooldown_days": 3,     # повторный сигнал «Покупать X» в Telegram не чаще
     "rr_small_min": 1.5,        # «малый вход»: R:R от этого значения до порога
     "small_size": 0.5,          # доля обычного размера для «малого входа»
+    "no_loss_exit": 1,          # правило владельца: не советовать продажу в минус (стоп — только предупреждение)
     "fiat_fee_pct": 5,          # потери при выводе USDT → ₽ (обмен + комиссия), для оценки
 }
 
@@ -446,6 +447,21 @@ def sell_advice(coin, ind, plan, levels, prm, sold_since, max_close_since) -> di
             s = ", ".join(dist)
             reasons.insert(0, s[0].upper() + s[1:])
 
+    # правило владельца «не продавать в минус»: продажа, которая зафиксировала бы убыток
+    # к среднему входу (после спреда), превращается в «Держать» с предупреждением
+    if prm["no_loss_exit"] and status in ("exit", "take") and coin["entry"] \
+            and cl * (1 - fee) < coin["entry"]:
+        loss_pct = (cl * (1 - fee) / coin["entry"] - 1) * 100
+        reasons = [r for r in reasons if not r.startswith("Продать ") and "ниже стопа" not in r
+                   and "ниже трейлинг" not in r and not r.startswith("Закрытие") and not r.startswith("Стоп ")]
+        was = "выход" if status == "exit" else "фиксация"
+        status, title = "hold", "Держать: в минус не продаём"
+        reasons.insert(0, f"⚠ Сработал сигнал «{was}»: "
+                          f"закрытие {_px(cl)}, стоп {_px(stop) if stop else '—'}")
+        reasons.insert(1, f"Продажа сейчас = {loss_pct:+.1f}% к среднему входу {_px(coin['entry'])} — правило «не продавать в минус»")
+        be = coin["entry"] / (1 - fee)
+        reasons.insert(2, f"Безубыток (с учётом спреда) — {_px(be)} ({_pct(be, price):+.1f}% от текущей цены)")
+
     # пометки
     if ind["rsi"] and ind["rsi"] > prm["rsi_hot"]:
         reasons.append(f"RSI {ind['rsi']:.0f} — перекупленность, риск отката")
@@ -528,11 +544,25 @@ def buy_candidate(coin, ind, levels, prm, usdt_apr, capital, usdt) -> dict | Non
         reasons.append(f"Earn {coin['earn_apr']:g}% − инфляция {coin['inflation']:g}% = {real:.1f}% < USDT {usdt_apr:g}% — порог R:R выше")
     return {
         "symbol": coin["symbol"], "ok": ok, "small": small, "rr": rr, "rr_need": rr_need, "price": p,
+        # открытая позиция по монете — тогда сигнал на покупку это докупка (усреднение)
+        "pos_qty": max(coin.get("qty", 0) - coin.get("core_qty", 0), 0) if coin.get("entry") else 0,
+        "pos_entry": coin.get("entry"), "fee_pct": coin.get("fee_pct", 1),
         "amount_small": amount * prm["small_size"],
         "amount": amount, "zone": [S, zone_hi],
         "plan": {"t1": R1, "t2": R2, "stop": stop},
         "reasons": reasons,
     }
+
+
+def _averaging(c, amount) -> tuple[str, list[str]]:
+    """Если по монете уже есть позиция — «Докупить … средний вход станет …»."""
+    if not c.get("pos_qty") or not c.get("pos_entry"):
+        return "", []
+    q_new = amount / (c["price"] * (1 + c["fee_pct"] / 100))
+    avg = (c["pos_qty"] * c["pos_entry"] + amount) / (c["pos_qty"] + q_new)
+    return (f" — средний вход станет {_px(avg)}",
+            [f"Сейчас в позиции {c['pos_qty']:.0f} {c['symbol']} по {_px(c['pos_entry'])}; "
+             f"после докупки ≈ {c['pos_qty'] + q_new:.0f} шт по {_px(avg)}"])
 
 
 def buy_advice(cands, usdt, prm, filled: dict | None = None) -> dict:
@@ -556,21 +586,25 @@ def buy_advice(cands, usdt, prm, filled: dict | None = None) -> dict:
             }
         if small:
             s = small[0]
+            avg_t, avg_r = _averaging(s, s["amount_small"])
+            plan_line = (["План позиции не меняется — продажа только по целям выше среднего входа"] if avg_r else
+                         [f"План: T1 {_px(s['plan']['t1'])}, T2 {_px(s['plan']['t2'])}, стоп {_px(s['plan']['stop'])}"])
             return {
                 "status": "buy_small", "symbol": s["symbol"], "zone": s["zone"], "amount": s["amount_small"],
-                "title": f"Малый вход: {s['symbol']} на {_usd(s['amount_small'])}",
-                "reasons": [
-                    f"R:R {s['rr']:.1f} ниже порога {s['rr_need']:g} — половина обычного размера",
-                    f"План: T1 {_px(s['plan']['t1'])}, T2 {_px(s['plan']['t2'])}, стоп {_px(s['plan']['stop'])}",
-                ],
+                "title": f"Малый вход{' (докупка)' if avg_r else ''}: {s['symbol']} на {_usd(s['amount_small'])}{avg_t}",
+                "reasons": [f"R:R {s['rr']:.1f} ниже порога {s['rr_need']:g} — половина обычного размера"]
+                           + avg_r + plan_line,
                 "candidates": cands,
             }
         return {"status": "wait", "title": "Ждать", "reasons": [], "candidates": cands}
     b = good[0]
+    avg_t, avg_r = _averaging(b, b["amount"])
+    plan_line = (["План позиции не меняется — продажа только по целям выше среднего входа"] if avg_r else
+                 [f"План: T1 {_px(b['plan']['t1'])}, T2 {_px(b['plan']['t2'])}, стоп {_px(b['plan']['stop'])}"])
     return {
         "status": "buy", "symbol": b["symbol"], "zone": b["zone"], "amount": b["amount"],
-        "title": f"Покупать {b['symbol']} на {_usd(b['amount'])}",
-        "reasons": [f"План: T1 {_px(b['plan']['t1'])}, T2 {_px(b['plan']['t2'])}, стоп {_px(b['plan']['stop'])}"],
+        "title": f"{'Докупить' if avg_r else 'Покупать'} {b['symbol']} на {_usd(b['amount'])}{avg_t}",
+        "reasons": avg_r + plan_line,
         "candidates": cands,
     }
 
