@@ -100,19 +100,26 @@ Nginx терминирует TLS и проксирует сервисы. Сер�
 
 **ВАЖНО (урок от 24.08.2026):** сертификат `tailscale cert` живёт не год, а
 около 1.5–3 месяцев (Let's Encrypt-подобный). 24.08.2026 он протух (истёк
-11.08.2026), потому что обновляли вручную "раз в год" — это и было причиной
-ошибки. Проверяйте реальный срок и обновляйте примерно раз в 1-2 месяца, в
-идеале — через cron/systemd-таймер (пока не настроено, см. «Известные
-проблемы» ниже):
+11.08.2026), а 11.10.2026 — ещё раз: ручной `tailscale cert` 24.08 вернул
+закэшированный старый сертификат (tailscale перевыпускает только ближе к
+истечению), так что «обновление» ничего не продлило.
+
+**С 11.10.2026 — автоматически:**
+- `scripts/renew_nginx_cert.sh` → `/usr/local/bin/`, cron
+  `/etc/cron.d/nginx-cert-renew` ежедневно в 04:17, лог
+  `/var/log/nginx-cert-renew.log`. Если файл сертификата поменялся —
+  `nginx -s reload`.
+- Алерт Grafana `nginx TLS cert expires soon` (папка Infra) — срабатывает,
+  если до истечения < 14 дней или метрика `cert_expiry_timestamp_seconds`
+  пропала; шлёт в Telegram через бота портала (contact point
+  «Telegram (portal bot)», он же дефолтный в notification policy).
 
 ```bash
 # Проверить срок действия
 echo | openssl s_client -connect localhost:8443 -servername core.tail751bc9.ts.net 2>/dev/null | openssl x509 -noout -enddate
 
-# Получить/обновить сертификат
-cd /tmp && tailscale cert core.tail751bc9.ts.net
-cp core.tail751bc9.ts.net.* /opt/smart-home/config/nginx/
-docker compose restart nginx
+# Обновить вручную
+sudo /usr/local/bin/renew_nginx_cert.sh
 ```
 
 Этот файл использует **только** nginx (маршруты через порт 8443/8445, см.
@@ -201,6 +208,10 @@ skeleton-плейсхолдерах) — вероятная причина не 
 
 FastAPI + PostgreSQL + Telegram Mini App. Подробная документация в `config/portal/README.md`.
 
+Вкладки: Todo, Финансы (Кредиты · Д/К · Траты · Крипто), События, Календарь
+(заготовка), Гараж, Заметки, 2FA, Настройки. Бот `@ken_sho_portal_bot`:
+`/portal`, `/wallet` + исходящие алерты (события, крипто-сигналы).
+
 **Запуск:**
 ```bash
 systemctl status portal
@@ -241,13 +252,16 @@ journalctl -u portal -f
     grafana_dashboards/
     portal/
       README.md           # Документация портала
-      main.py
+      portal.html, sw.js
+      main.py, crypto.py, budget.py
       requirements.txt
       *_schema.sql
   scripts/
-    collect_configs.sh
+    collect_configs.sh    # ночной сбор конфигов (+ вызывает backup_db_cloud.sh)
     git_push.sh
+    backup_db_cloud.sh    # pg_dumpall → Яндекс Диск
     check_connectivity.sh
+    renew_nginx_cert.sh
 
 /data/                    # HDD 500GB (UUID: 0d812c59-9f59-4129-9808-36abc88ad3ec)
   homeassistant/
@@ -261,7 +275,9 @@ journalctl -u portal -f
   portal/
     portal.html
     backend/
+    statements/           # PDF-справки банка (ФИО, счёт) — НЕ в git и НЕ в бэкапах
   backups/
+    db/                   # core_<день недели>.sql — 7 дневных дампов
 
 /var/lib/node-exporter/textfile/
   connectivity.prom
@@ -276,7 +292,8 @@ journalctl -u portal -f
 | Метрика | Описание |
 |---------|----------|
 | `tailscale_up` | Статус Tailscale (1=Running, 0=не работает) |
-| `telegram_reachable` | Доступность Telegram через AWG (1=OK, 0=недоступен) |
+| `telegram_reachable` | Доступность Telegram дефолтным маршрутом (1=OK, 0=недоступен) |
+| `cert_expiry_timestamp_seconds` | Срок TLS-сертификата nginx (панель «TLS Cert» + алерт < 14 дней) |
 
 ---
 
@@ -429,7 +446,15 @@ ip route add 100.64.0.0/10 dev tailscale0 2>/dev/null || true
 cp /opt/smart-home-git/scripts/check_connectivity.sh /usr/local/bin/
 chmod +x /usr/local/bin/check_connectivity.sh
 echo "* * * * * root /usr/local/bin/check_connectivity.sh" > /etc/cron.d/connectivity-check
+
+# Автообновление TLS-сертификата nginx
+install -m 755 /opt/smart-home-git/scripts/renew_nginx_cert.sh /usr/local/bin/
+echo "17 4 * * * root /usr/local/bin/renew_nginx_cert.sh >> /var/log/nginx-cert-renew.log 2>&1" > /etc/cron.d/nginx-cert-renew
 ```
+
+Алерт Grafana на срок сертификата + Telegram contact point создаются через
+API Grafana (не в provisioning-файлах) — при восстановлении создать заново
+(см. «Nginx — Reverse Proxy»).
 
 ### Шаг 14 — Проверка
 
@@ -451,15 +476,25 @@ curl https://core.tail751bc9.ts.net && echo OK         # Funnel работает
 
 Автоматический бэкап — крон ежесуточно в 3:00:
 
-- `collect_configs.sh` — собирает конфиги, схемы портала, дашборды Grafana
-- `git_push.sh` — коммит и пуш в GitHub
+- `collect_configs.sh` — собирает конфиги, код и схемы портала, дашборды
+  Grafana в `/opt/smart-home-git`, в конце вызывает `backup_db_cloud.sh`
+- `backup_db_cloud.sh` — `pg_dumpall` всех баз в
+  `/data/backups/db/core_<день недели>.sql` (глубина 7 дней, перезапись по
+  дню недели) + `rclone copy` в `yadisk:backups/core-db`. Дамп не шифруется.
+- `git_push.sh` — `pull --rebase` + коммит + пуш в GitHub, лог
+  `/var/log/smart-home-backup.log`
 
 ```bash
 bash /opt/smart-home-git/scripts/collect_configs.sh
 bash /opt/smart-home-git/scripts/git_push.sh
 ```
 
-PostgreSQL бэкапы — через Barman на NAS (планируется).
+**Что где восстанавливается:** всё, что живёт в PostgreSQL (включая фото и
+сканы документов Гаража — `garage.service_files`, bytea) — из дампа с
+Яндекс Диска. Код и конфиги — из GitHub. Банковские справки
+`/data/portal/statements/` намеренно никуда не копируются.
+
+Barman на NAS — планируется.
 
 ---
 
@@ -487,9 +522,21 @@ PostgreSQL бэкапы — через Barman на NAS (планируется).
 
 ## Известные проблемы / TODO
 
-- **Автообновление TLS-сертификата nginx не настроено** — сейчас вручную
-  (см. «Nginx — Reverse Proxy»). Обсуждали cron vs. кнопку в личном
-  портале (root-сервис, уже может шеллить команды) — решение отложено.
+- **Ночной git-бэкап с Core не доходит до GitHub с ~26.08.2026** (аудит
+  30.10.2026). В `/opt/smart-home-git` завис интерактивный rebase
+  (`.git/rebase-merge`, detached HEAD): `git pull --rebase` в
+  `git_push.sh` упал на конфликте, когда в репо пушили с ноутбука, и
+  скрипт это никак не обрабатывает. С тех пор каждую ночь коммит ложится
+  на detached HEAD, а `git push origin master` отклоняется
+  (non-fast-forward). Дампы БД в Яндекс Диск при этом идут нормально.
+  Лечится: `git rebase --abort`, сохранить ветку на всякий случай,
+  `git reset --hard origin/master`, прогнать `collect_configs.sh` +
+  `git_push.sh`. И сделать `git_push.sh` устойчивым: при неудачном
+  rebase — `git rebase --abort` и алерт, а не молчаливое зависание.
+- **Портал в Telegram после деплоя `portal.html` может не открываться**
+  до перезапуска Telegram (30.09.2026) — вероятно, кэш WebView/`sw.js`
+  держит старую версию. Не расследовано.
+
 - **Tuya-интеграция в Home Assistant периодически просит
   ре-авторизацию** (`Authentication failed. Please re-authenticate`,
   всплывает после каждого рестарта HA) — чинится вручную в UI
@@ -518,3 +565,5 @@ PostgreSQL бэкапы — через Barman на NAS (планируется).
 | v0.7 | 2026-06 | PostgreSQL 18, Vaultwarden, nginx reverse proxy, Homer, Grafana/HA → PostgreSQL |
 | v0.8 | 2026-06 | Личный портал (FastAPI + PostgreSQL + Telegram Mini App), авторизация |
 | v0.9 | 2026-08 | Vaultwarden: фикс DOMAIN/sub-path (dedicated `tailscale serve :8446`), апдейт 1.36.0→1.37.2; обновлён протухший TLS-сертификат nginx (каданс в README был неверный — не год, а ~1-2 мес); фикс бага рассинхрона проекта в Заметках портала (кросс-вкладочный localStorage) |
+| v0.10 | 2026-10 | TLS-сертификат nginx снова протух → автообновление по cron (`renew_nginx_cert.sh`) + алерт Grafana в Telegram при сроке < 14 дней |
+| v0.11 | 2026-09/10 | Портал: Финансы → Крипто (GRAM/TRX/USDT: портфель, индикаторы, планы, советы купить/продать, свечные графики, алерты в Telegram, правило «в минус не продаём») и Траты (импорт PDF-справок Ozon Банка, категории/правила/сплиты, график по месяцам, регулярные платежи); Гараж — подпункты записей (работы/запчасти, итог из подпунктов) и фото/сканы чеков в БД; бот — `/wallet` и меню команд; Ctrl+A в окнах выделяет только содержимое |

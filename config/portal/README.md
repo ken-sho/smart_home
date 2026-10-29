@@ -16,10 +16,13 @@ Vivaldi sidebar / Telegram Mini App
         ▼
    FastAPI :7000  ←→  PostgreSQL 18 (локально)
    /data/portal/
-     portal.html      ← весь фронтенд, один файл (~306KB)
+     portal.html      ← весь фронтенд, один файл (~430KB)
      sw.js            ← Service Worker (браузерные уведомления)
+     statements/      ← PDF-справки банка (0700, НЕ в git и НЕ в бэкапах)
      backend/
        main.py        ← API + бот + авторизация + планировщик
+       crypto.py      ← Крипто: сбор цен, портфель, советы, алерты
+       budget.py      ← Траты: парсер справок Ozon Банка, раскладка по категориям
        *_schema.sql   ← схемы БД, накатываются при старте
        google_auth_migration.py  ← парсер Google Authenticator export
 ```
@@ -28,7 +31,7 @@ Vivaldi sidebar / Telegram Mini App
 
 **Бэкенд** — FastAPI (Python 3.12). Запускается как systemd сервис. При старте автоматически накатывает SQL схемы (идемпотентно).
 
-**Планировщик** — APScheduler внутри FastAPI процесса. Единая джоба `notify_tick` каждую минуту — обработка всех событий, автоочистка, Telegram оповещения.
+**Планировщик** — APScheduler внутри FastAPI процесса. Две джобы: `notify_tick` каждую минуту — обработка всех событий, автоочистка, Telegram оповещения; `crypto_tick` раз в час в :05 — цены CoinGecko, пересчёт советов, крипто-алерты.
 
 **БД** — PostgreSQL 18, база `portal`, пользователь `portal`. Каждый модуль — отдельная схема.
 
@@ -39,10 +42,10 @@ Vivaldi sidebar / Telegram Mini App
 | Вкладка | Иконка | Схема БД | Статус | Описание |
 |---------|--------|----------|--------|----------|
 | Todo | ✅ | `todo` | В БД | Списки задач трёх типов: покупки, дела, разовые |
-| Финансы | 💰 | `finance` | В БД | Кредиты и платежи по месяцам |
+| Финансы | 💰 | `finance`, `budget`, `crypto` | В БД | Режимы: Кредиты · Д/К · Траты · Крипто (см. ниже) |
 | События | 🎂 | `evt` | В БД | Yearly/daily события с Telegram оповещениями |
 | Календарь | 📅 | `cal` | Заготовка | Планируется CalDAV (DavMail/Outlook) |
-| Гараж | 🚗 | `garage` | В БД | История ТО транспортных средств |
+| Гараж | 🚗 | `garage` | В БД | ТС → записи обслуживания с подпунктами и фото/сканами (см. ниже) |
 | Заметки | 📝 | `notes` | В БД | Заметки с проектами, тегами, кодом, поиском |
 | 2FA коды | 🛡 | `auth2fa` | В БД | TOTP коды (импорт из Google Authenticator) |
 | Настройки | ⚙️ | `app` | В БД | Telegram токен, owner ID, Chat ID и др. |
@@ -56,7 +59,9 @@ Vivaldi sidebar / Telegram Mini App
 | `todo_schema.sql` | `todo` | `lists`, `items`, `tags` |
 | `notes_schema.sql` | `notes` | `projects`, `tags`, `notes`, `note_tags`, `quick` |
 | `finance_schema.sql` | `finance` | `credits`, `entries` |
-| `garage_schema.sql` | `garage` | `vehicles`, `services` |
+| `garage_schema.sql` | `garage` | `vehicles`, `services` (+ `items` jsonb), `service_files` (bytea) |
+| `budget_schema.sql` | `budget` | `statements`, `ops`, `categories`, `rules`, `splits` |
+| `crypto_schema.sql` | `crypto` | `assets`, `prices`, `trades`, `cash`, `plans`, `levels`, `params`, `signals` |
 | `events_schema.sql` | `evt` | `events`, `sent_log` |
 | `cal_schema.sql` | `cal` | `accounts`, `calendars`, `events` |
 | `auth2fa_schema.sql` | `auth2fa` | `accounts` |
@@ -69,6 +74,73 @@ Vivaldi sidebar / Telegram Mini App
 - Новые колонки: `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`
 - В конце: `ALTER SCHEMA ... OWNER TO portal` и `ALTER TABLE ... OWNER TO portal`
 - Сидинг дефолтных строк: только `INSERT ... WHERE NOT EXISTS`
+
+---
+
+## Финансы → Траты (`budget.py`)
+
+Импорт PDF-справки о движении средств Ozon Банка (кнопка импорта в режиме
+«Траты»). Парсер сверяет себя с итогами справки до копейки — не сошлось,
+ничего не пишет (частичный импорт хуже никакого). Повторная загрузка того
+же периода дублей не создаёт (`UNIQUE (bank, op_at, doc, amount)`).
+Оригинал кладётся в `/data/portal/statements/` (намеренно вне git и бэкапов:
+ФИО, номер счёта).
+
+Вид операции (`kind`) определяется по назначению платежа: card, ozon,
+ozon_refund, sbp_person, sbp_org, payment, salary, self, credit, other.
+`self` (переводы между своими счетами, СБП самому себе) и `credit` (погашение
+кредита — учитывается в «Кредитах») хранятся, но в траты не входят.
+
+Дальше: категории и правила раскладки (подстрока контрагента/назначения
+или `kind:<вид>`, по priority; «запомнить» из карточки операции создаёт
+правило), заметки и сплиты операции на несколько категорий, очередь
+«разобрать», строка банка в Д/К, график трат по категориям по месяцам с
+дельтами к прошлому месяцу, регулярные платежи. Лимиты/дневной бюджет —
+сознательно не делались.
+
+---
+
+## Финансы → Крипто (`crypto.py`)
+
+Портфель GRAM / TRX + касса USDT (Telegram Wallet). Цены собирает бэкенд
+раз в час из CoinGecko (`crypto_tick`); при пустой истории догружает год
+дневных и 90 дней почасовых точек.
+
+- **Портфель** — метод средней стоимости по журналу сделок (buy / earn /
+  sell / writeoff); Earn-начисления не портят среднюю цену покупки.
+- **Советы** — по закрытым дневным свечам, торговый день 12:00–12:00 МСК.
+  Продажа: стоп / T1 (⅓ + стоп в безубыток) / T2 (до ⅔) / трейлинг для
+  последней трети. Покупка: зона у поддержки, R:R, RSI, тренд; «малый
+  вход» половинным размером. Пороги подобраны бэктестом 25.11.2025–29.09.2026
+  (подробности — в докстринге `crypto.py`).
+- **Правило «в минус не продаём»** (параметр `no_loss_exit=1`): стоп,
+  трейлинг или фиксация, которые реализовали бы убыток к средней цене входа,
+  превращаются в предупреждение «Держать». Докупка в минусе разрешена —
+  совет показывает, каким станет средний вход.
+- **Настройки по монете:** стратегия swing / hold / dca, частота проверки
+  входа, кулдаун сигналов, тихие часы (сообщения откладываются, не теряются).
+- **Telegram-алерты:** смена совета, пробой уровней и MA200, резкие движения
+  за 24 ч, отмена покупки при пробое поддержки, сводка к зарплате.
+- Свечные графики с линиями плана, зоной покупки и отметками сделок;
+  вывод в фиат проводится доходом в Д/К по рыночному курсу минус комиссия;
+  режим приватности размывает суммы.
+
+---
+
+## Гараж
+
+ТС (метки, архив) → записи обслуживания. Запись = заголовок + дата + пробег
++ **подпункты** `items: [{name, cost, kind}]`, где `kind` = `work` (работа) /
+`part` (запчасть) / `null` (без типа — так мигрировали старые записи). Сумма
+записи (`cost`) всегда считается сервером из подпунктов. В списке запись
+свёрнута, подпункты раскрываются гармошкой (состояние не сохраняется).
+
+**Документы** (фото/сканы чека и заказ-наряда, сколько угодно на запись) —
+в `garage.service_files.data` (bytea), чтобы попадать в ночной
+`pg_dumpall` вместе с записями. Фото браузер ужимает до 2400 px (JPEG 0.85),
+PDF — как есть, лимит 15 МБ, тип проверяется по сигнатуре. `bootstrap`
+отдаёт только метаданные, содержимое — `GET /api/garage/files/{id}`.
+Удаляются каскадом вместе с записью.
 
 ---
 
@@ -172,11 +244,15 @@ scp sw.js shadmin@192.168.10.254:/data/portal/sw.js
 |---------|-------|
 | `/start` | Приветствие + кнопка открытия портала |
 | `/portal` | Кнопка открытия портала |
+| `/wallet` | Кнопка-ссылка на Telegram Wallet (`t.me/wallet/start`) |
+
+Меню команд («/» в чате) регистрируется через `setMyCommands` вместе с webhook.
 
 **Mini App:** `t.me/ken_sho_portal_bot/portal`
 
 **Webhook:** `https://core.tail751bc9.ts.net/api/bot/webhook`  
-Регистрируется автоматически при старте если задан токен.
+Регистрируется автоматически при старте если задан токен. Входящие команды
+зависят от Tailscale Funnel (публичный 443); исходящие алерты — нет.
 
 Принудительная перерегистрация:
 ```bash
@@ -228,18 +304,27 @@ RestartSec=5
 
 ## Деплой обновлений
 
-```bash
-# С ноутбука
-scp potral.zip portal.html sw.js shadmin@192.168.10.254:/data/portal/
+Правим в репо на ноутбуке, деплоим по файлу, потом коммит + пуш.
 
-# На Core
-systemctl stop portal
-cd /data/portal && unzip -o potral.zip
+1. Сверить живой файл с `HEAD` (`md5sum`) — чтобы не затереть правку,
+   которой нет в репо.
+2. Бэкап рядом: `cp <файл> <файл>.bak_$(date +%Y%m%d_%H%M%S)`.
+3. Залить:
+   - `portal.html`, `sw.js` → `/data/portal/` — **рестарт не нужен**,
+     `portal.html` читается с диска на каждый запрос;
+   - `main.py`, `crypto.py`, `budget.py`, `*_schema.sql` →
+     `/data/portal/backend/` (владелец root) → `systemctl restart portal`,
+     схемы накатятся на старте.
+4. Проверить: `systemctl is-active portal`, `curl -s -o /dev/null -w '%{http_code}' http://localhost:7000/`,
+   `journalctl -u portal -n 20 --no-pager` без traceback.
+
+```bash
 # При изменении requirements.txt:
-source backend/.venv/bin/activate && pip install -r backend/requirements.txt
-systemctl start portal
-journalctl -u portal -n 10 --no-pager
+source /data/portal/backend/.venv/bin/activate && pip install -r /data/portal/backend/requirements.txt
 ```
+
+Telegram на телефоне может держать старую версию страницы — если после
+деплоя портал там не открывается, перезапустить Telegram.
 
 ### Проверка после деплоя
 
@@ -311,9 +396,34 @@ POST /api/finance/entries / PATCH /{id} / DELETE /{id}
 
 ### Гараж
 ```
-GET  /api/garage/bootstrap  → { vehicles, services }
-POST /api/garage/vehicles / PATCH /{id} / DELETE /{id}
-POST /api/garage/services / PATCH /{id} / DELETE /{id}
+GET  /api/garage/bootstrap  → { vehicles, services, files (метаданные) }
+POST /api/garage/vehicles / PATCH /{id} / DELETE /{id}   (DELETE — только из архива)
+POST /api/garage/services / PATCH /{id} / DELETE /{id}   (items → cost считается сервером)
+POST /api/garage/services/{id}/files   multipart file → метаданные
+GET  /api/garage/files/{id}            → содержимое файла
+DELETE /api/garage/files/{id}
+```
+
+### Траты
+```
+POST /api/budget/import               multipart PDF-справка
+GET  /api/budget/month/{YYYY-MM}
+GET  /api/budget/history | /recurring | /unsorted | /statements
+PATCH /api/budget/ops/{id}            { category_id, note, remember }
+PUT  /api/budget/ops/{id}/splits      { parts: [{category_id, amount}] }
+POST /api/budget/rules | /categories
+```
+
+### Крипто
+```
+GET  /api/crypto/bootstrap
+GET  /api/crypto/candles/{symbol}?days=N
+GET  /api/crypto/fiat-quote
+POST /api/crypto/refresh | /reconcile | /notify/salary
+POST /api/crypto/trades / DELETE /{id}
+POST /api/crypto/cash / DELETE /{id}
+PUT  /api/crypto/plans/{symbol} | /levels/{symbol} | /params/{key}
+PATCH /api/crypto/assets/{symbol}
 ```
 
 ### События
@@ -350,6 +460,6 @@ POST /api/2fa/import/confirm → сохранить выбранные акка�
 
 - Календарь → CalDAV синхронизация через DavMail (Outlook)
 - Дни рождения → перенос в `evt` схему (сейчас localStorage)
-- DR реплика → дамп `portal` БД по расписанию на VPS
+- DR реплика на VPS (сейчас есть только ночной `pg_dumpall` → Яндекс Диск, 7 дней, см. корневой README)
 - Telegram бот `/start` → статус системы (активные задачи, платежи)
 - Алерты → просроченные задачи, ближайшие события календаря
