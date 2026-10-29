@@ -520,6 +520,89 @@
         "type": "prometheus",
         "uid": "ffnxnere9kw00e"
       },
+      "description": "\u0414\u043d\u0435\u0439 \u0434\u043e \u0438\u0441\u0442\u0435\u0447\u0435\u043d\u0438\u044f TLS-\u0441\u0435\u0440\u0442\u0438\u0444\u0438\u043a\u0430\u0442\u0430 nginx (core.tail751bc9.ts.net.crt)",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": 0
+              },
+              {
+                "color": "orange",
+                "value": 7
+              },
+              {
+                "color": "green",
+                "value": 21
+              }
+            ]
+          },
+          "unit": "d"
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 2,
+        "x": 16,
+        "y": 0
+      },
+      "id": 13,
+      "options": {
+        "barShape": "flat",
+        "barWidthFactor": 0.3,
+        "effects": {
+          "barGlow": false,
+          "centerGlow": false,
+          "gradient": true
+        },
+        "endpointMarker": "point",
+        "minVizHeight": 75,
+        "minVizWidth": 75,
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "segmentCount": 1,
+        "segmentSpacing": 0.3,
+        "shape": "gauge",
+        "showThresholdLabels": false,
+        "showThresholdMarkers": false,
+        "sizing": "auto",
+        "sparkline": true,
+        "textMode": "auto"
+      },
+      "pluginVersion": "13.0.1",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ffnxnere9kw00e"
+          },
+          "editorMode": "code",
+          "expr": "(cert_expiry_timestamp_seconds{domain=\"core.tail751bc9.ts.net\"} - time()) / 86400",
+          "legendFormat": "__auto",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "TLS Cert",
+      "type": "gauge"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "ffnxnere9kw00e"
+      },
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -1008,78 +1091,6 @@
       ],
       "title": "Telegram",
       "type": "stat"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "ffnxnere9kw00e"
-      },
-      "description": "Дней до истечения TLS-сертификата nginx (core.tail751bc9.ts.net.crt)",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "red",
-                "value": null
-              },
-              {
-                "color": "orange",
-                "value": 7
-              },
-              {
-                "color": "green",
-                "value": 21
-              }
-            ]
-          },
-          "unit": "d"
-        }
-      },
-      "gridPos": {
-        "h": 4,
-        "w": 2,
-        "x": 16,
-        "y": 0
-      },
-      "id": 13,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "percentChangeColorMode": "standard",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "showPercentChange": false,
-        "textMode": "auto",
-        "wideLayout": true
-      },
-      "pluginVersion": "13.0.1",
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "ffnxnere9kw00e"
-          },
-          "editorMode": "code",
-          "expr": "(cert_expiry_timestamp_seconds{domain=\"core.tail751bc9.ts.net\"} - time()) / 86400",
-          "legendFormat": "__auto",
-          "range": true,
-          "refId": "A"
-        }
-      ],
-      "title": "TLS Cert",
-      "type": "stat"
     }
   ],
   "preload": false,
@@ -1104,7 +1115,7 @@
     ]
   },
   "timezone": "browser",
-  "title": "System — Core",
+  "title": "System \u2014 Core",
   "uid": "addz6pb",
-  "version": 3
+  "version": 4
 }
