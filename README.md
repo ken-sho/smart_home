@@ -481,8 +481,9 @@ curl https://core.tail751bc9.ts.net && echo OK         # Funnel работает
 - `backup_db_cloud.sh` — `pg_dumpall` всех баз в
   `/data/backups/db/core_<день недели>.sql` (глубина 7 дней, перезапись по
   дню недели) + `rclone copy` в `yadisk:backups/core-db`. Дамп не шифруется.
-- `git_push.sh` — `pull --rebase` + коммит + пуш в GitHub, лог
-  `/var/log/smart-home-backup.log`
+- `git_push.sh` — коммит + `pull --rebase` + пуш в GitHub, лог
+  `/var/log/smart-home-backup.log`; при конфликте/ошибке пуша откатывает
+  rebase и шлёт алерт в Telegram
 
 ```bash
 bash /opt/smart-home-git/scripts/collect_configs.sh
@@ -522,17 +523,25 @@ Barman на NAS — планируется.
 
 ## Известные проблемы / TODO
 
-- **Ночной git-бэкап с Core не доходит до GitHub с ~26.08.2026** (аудит
-  30.10.2026). В `/opt/smart-home-git` завис интерактивный rebase
-  (`.git/rebase-merge`, detached HEAD): `git pull --rebase` в
-  `git_push.sh` упал на конфликте, когда в репо пушили с ноутбука, и
-  скрипт это никак не обрабатывает. С тех пор каждую ночь коммит ложится
-  на detached HEAD, а `git push origin master` отклоняется
-  (non-fast-forward). Дампы БД в Яндекс Диск при этом идут нормально.
-  Лечится: `git rebase --abort`, сохранить ветку на всякий случай,
-  `git reset --hard origin/master`, прогнать `collect_configs.sh` +
-  `git_push.sh`. И сделать `git_push.sh` устойчивым: при неудачном
-  rebase — `git rebase --abort` и алерт, а не молчаливое зависание.
+- **Выгрузка дампов БД на Яндекс Диск не работает** (найдено 30.10.2026,
+  с какого числа — неизвестно: вывод `backup_db_cloud.sh` никуда не
+  логируется). `rclone` (1.60.1 из apt) получает `410 GoneError — Ресурс
+  больше недоступен` на любом листинге, при этом `rclone about` работает.
+  Известная проблема: Яндекс перестал пускать к файлам встроенный OAuth-клиент
+  rclone ([rclone#10067](https://github.com/rclone/rclone/issues/10067)).
+  Лечение: своё приложение на oauth.yandex.ru (доступ к Диску), `rclone
+  config` с его client_id/secret, интерактивная авторизация в браузере.
+  Пока дампы есть только локально в `/data/backups/db` (тот же диск, что и
+  данные). Заодно: логировать вывод `backup_db_cloud.sh` и алертить при
+  ошибке `rclone`.
+- ~~Ночной git-бэкап с Core не доходил до GitHub 26.08–30.10.2026~~ —
+  исправлено 30.10.2026. В `/opt/smart-home-git` висел незавершённый rebase:
+  старый `git_push.sh` делал `pull --rebase` до коммита и не обрабатывал
+  конфликт. Rebase откачен, зависшие ночные коммиты сохранены в ветке
+  `stuck-backup-20261030` (только на Core), репо выровнено по
+  `origin/master`. Новый `git_push.sh`: сначала коммит, потом
+  `pull --rebase`; при ошибке — `rebase --abort` + алерт в Telegram ботом
+  портала.
 - **Портал в Telegram после деплоя `portal.html` может не открываться**
   до перезапуска Telegram (30.09.2026) — вероятно, кэш WebView/`sw.js`
   держит старую версию. Не расследовано.
