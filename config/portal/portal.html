@@ -8087,6 +8087,34 @@ document.addEventListener('keydown', (e) => {
   if (document.getElementById('noteEditor').classList.contains('open')) { closeNoteForm(); return; }
   if (document.getElementById('noteViewer').classList.contains('open')) closeNoteViewer();
 });
+// Ctrl/⌘+A внутри открытого окна — выделяем только его содержимое, а не всю страницу
+// (e.code — физическая клавиша, работает и на русской раскладке)
+document.addEventListener('keydown', (e) => {
+  if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey || e.code !== 'KeyA') return;
+  const ae = document.activeElement;
+  if (ae && (ae.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName))) return;  // поле ввода — штатно
+  const overlays = [...document.querySelectorAll('.modal-overlay.open')];
+  if (!overlays.length) return;
+  // верхнее окно: максимальный z-index, при равенстве — последнее в DOM
+  const ov = overlays.reduce((top, o) => (parseInt(getComputedStyle(o).zIndex, 10) || 0) >= (parseInt(getComputedStyle(top).zIndex, 10) || 0) ? o : top);
+  e.preventDefault();
+  if (ov.id === 'noteEditor') {
+    const code = document.getElementById('codeEdit');
+    if (document.getElementById('codeEditWrap').style.display !== 'none') { code.focus(); code.select(); return; }
+    document.getElementById('rte').focus();
+    document.execCommand('selectAll');
+    return;
+  }
+  const range = document.createRange();
+  const modal = ov.querySelector('.modal');
+  const title = modal && modal.querySelector(':scope > .modal-title');
+  const actions = modal && modal.querySelector(':scope > .modal-actions');
+  if (ov.id === 'noteViewer') range.selectNodeContents(document.getElementById('viewerBody'));
+  else if (modal && title && actions && title.nextSibling !== actions) { range.setStartAfter(title); range.setEndBefore(actions); }
+  else range.selectNodeContents(modal || ov);
+  const sel = window.getSelection();
+  sel.removeAllRanges(); sel.addRange(range);
+});
 // delegated copy for fenced code inside markdown
 document.addEventListener('click', (e) => {
   // ссылка внутри тела заметки — открываем, не разворачивая/не открывая карточку
