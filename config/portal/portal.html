@@ -3298,7 +3298,7 @@ function renderTodoTags() {
     const b = document.createElement('button');
     b.className = 'tag-btn' + (state.todoTagFilter === tag.id ? ' active' : '');
     const c = tagColor(tag.color);
-    b.innerHTML = `<span class="tdot" style="background:${c.fg}"></span>${tag.name}`;
+    b.innerHTML = `<span class="tdot" style="background:${c.fg}"></span>${escapeHtml(tag.name)}`;
     b.onclick = () => { state.todoTagFilter = tag.id; renderTodoTags(); renderTodoFeed(); };
     bar.appendChild(b);
   });
@@ -3384,7 +3384,7 @@ function buildListCard(l) {
     if (tl) subParts.push(`<span class="lc-timer"><i class="ti ti-clock-hour-4"></i>${tl}</span>`);
   }
   let tagHtml = '';
-  if (tag) { const c = tagColor(tag.color); tagHtml = `<span class="lc-tag" style="color:${c.fg};background:${c.bg};border-color:${c.fg}33">${tag.name}</span>`; }
+  if (tag) { const c = tagColor(tag.color); tagHtml = `<span class="lc-tag" style="color:${c.fg};background:${c.bg};border-color:${c.fg}33">${escapeHtml(tag.name)}</span>`; }
   div.innerHTML =
     `<div class="lc-icon"><i class="ti ${TODO_TYPE_ICON[l.type] || 'ti-list'}"></i></div>` +
     `<div class="lc-main"><div class="lc-name"></div><div class="lc-sub">${subParts.join('')}</div></div>` +
@@ -3413,7 +3413,7 @@ function renderTodoDetail() {
   // мета-строка
   const meta = document.getElementById('todoDetailMeta');
   const parts = [];
-  if (tag) { const c = tagColor(tag.color); parts.push(`<span class="dm-tag" style="color:${c.fg};background:${c.bg};border-color:${c.fg}33">${tag.name}</span>`); }
+  if (tag) { const c = tagColor(tag.color); parts.push(`<span class="dm-tag" style="color:${c.fg};background:${c.bg};border-color:${c.fg}33">${escapeHtml(tag.name)}</span>`); }
   if (l.type === 'shopping' && l.auto_clear_min) parts.push(`<span><i class="ti ti-clock-hour-4"></i> автоочистка через ${l.auto_clear_min} мин после отметки</span>`);
   if (l.type === 'once') parts.push(`<span><i class="ti ti-bell"></i> ${fmtRemind(l.remind_at)}${l.reminded ? ' · отправлено' : ''}</span>`);
   if (l.archived) parts.push('<span><i class="ti ti-archive"></i> в архиве</span>');
@@ -4166,7 +4166,7 @@ function openBudgetOp(o) {
     <select id="budOpCat">${budCatOptions(ck, o.category_id)}</select>
     <label class="cf-check"><input type="checkbox" id="budOpRemember"> Все операции «${escapeHtml(o.counterparty)}» — в эту категорию</label>`}
     <label>Заметка</label>
-    <input type="text" id="budOpNote" value="${escapeHtml(o.note || '')}" placeholder="напр. день рождения">
+    <input type="text" id="budOpNote" value="${escapeAttr(o.note || '')}" placeholder="напр. день рождения">
     ${o.excluded ? '' : `
     <label class="cf-check"><input type="checkbox" id="budOpSplitOn"${o.splits.length ? ' checked' : ''}> Разбить на части</label>
     <div id="budOpSplit" style="display:${o.splits.length ? 'flex' : 'none'};flex-direction:column;gap:5px"></div>`}`;
@@ -4268,7 +4268,7 @@ function openBudgetSort() {
     const r = document.createElement('div');
     r.className = 'bud-sort-row';
     r.innerHTML = `
-      <div class="bud-sort-top"><b title="${escapeHtml(u.counterparty)}">${escapeHtml(u.counterparty)}</b>
+      <div class="bud-sort-top"><b title="${escapeAttr(u.counterparty)}">${escapeHtml(u.counterparty)}</b>
         <span style="color:var(--text3)">${u.n}×</span><span class="${u.total > 0 ? 'c-up' : ''}">${fmtRub(u.total)}</span></div>
       <select data-kind="${kind}">${budCatOptions(kind, u.category_id)}</select>`;
     const s = r.querySelector('select');
@@ -6124,7 +6124,7 @@ function renderLabelRows(labels) { document.getElementById('vehLabelsList').inne
 function addLabelRow(name = '', value = '') {
   const box = document.getElementById('vehLabelsList');
   const row = document.createElement('div'); row.className = 'veh-label-row';
-  row.innerHTML = `<input class="vlr-name" placeholder="метка" value="${escapeHtml(name)}"><input class="vlr-val" placeholder="значение" value="${escapeHtml(value)}"><button class="vlr-del" title="Убрать">×</button>`;
+  row.innerHTML = `<input class="vlr-name" placeholder="метка" value="${escapeAttr(name)}"><input class="vlr-val" placeholder="значение" value="${escapeAttr(value)}"><button class="vlr-del" title="Убрать">×</button>`;
   row.querySelector('.vlr-del').onclick = () => row.remove();
   box.appendChild(row);
 }
@@ -6524,7 +6524,7 @@ function renderCrypto() {
 function cryptoMixHtml(coins, total) {
   const parts = coins.filter(c => (c.value || 0) > 0.5).sort((a, b) => b.value - a.value);
   if (!parts.length || total <= 0) return '';
-  const bar = parts.map(c => `<div style="flex:${c.value};background:${CRYPTO_COLORS[c.symbol] || 'var(--surface3)'}" title="${escapeHtml(c.symbol)}"></div>`).join('');
+  const bar = parts.map(c => `<div style="flex:${c.value};background:${CRYPTO_COLORS[c.symbol] || 'var(--surface3)'}" title="${escapeAttr(c.symbol)}"></div>`).join('');
   const legend = parts.map(c => `<span><i style="background:${CRYPTO_COLORS[c.symbol] || 'var(--surface3)'}"></i>${escapeHtml(c.symbol)} <b>${fmtUsd(c.value)}</b> · ${(c.value / total * 100).toFixed(0)}%</span>`).join('');
   return `<div class="crypto-mix"><div class="crypto-mix-bar">${bar}</div><div class="crypto-mix-legend">${legend}</div></div>`;
 }
@@ -6567,7 +6567,7 @@ function cryptoCardEl(c) {
       ${priceHtml}
     </div>
     ${cryptoAdviceHtml(c)}
-    ${isUsdt ? '' : `<div class="crypto-chart" data-sym="${escapeHtml(c.symbol)}"></div>`}
+    ${isUsdt ? '' : `<div class="crypto-chart" data-sym="${escapeAttr(c.symbol)}"></div>`}
     <div class="crypto-stats">${stats.map(([l, v]) => `<div><div class="crypto-stat-val">${v}</div><div class="crypto-stat-label">${l}</div></div>`).join('')}</div>
     ${isUsdt ? '' : cryptoIndHtml(c)}`;
   card.onclick = () => openCryptoForm('asset', c.symbol);

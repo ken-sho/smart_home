@@ -32,8 +32,7 @@ import asyncpg
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import FastAPI, HTTPException, Request, File, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 import crypto
 import budget
@@ -131,13 +130,8 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Portal API", lifespan=lifespan)
 
-# на случай разработки, когда portal.html открыт как файл (origin file://)
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# CORS намеренно не подключён: фронт и API на одном origin. Wildcard CORS при
+# авторизации по IP позволил бы любому сайту в браузере читать ответы API.
 
 
 # ══════════════════════════════════════════════════════════════
@@ -149,10 +143,14 @@ app.add_middleware(
 
 # CGNAT-диапазон Tailscale (100.64.0.0/10). За nginx настоящий адрес клиента
 # лежит в X-Real-IP (nginx ставит его из $remote_addr и затирает любой
-# присланный клиентом). Доверяем X-Real-IP ТОЛЬКО когда запрос пришёл от
-# самого прокси (приватный/loopback peer) — иначе публичный клиент, достучавшись
-# до бэкенда напрямую, мог бы подделать X-Real-IP: 100.x и обойти проверку.
+# присланный клиентом). Доверяем X-Real-IP ТОЛЬКО от сети nginx-контейнера
+# (TRUSTED_PROXIES): любой другой клиент — из LAN, с хоста, из чужой docker-сети —
+# мог бы прислать X-Real-IP: 100.x и обойти проверку.
 TAILSCALE_RANGE = ipaddress.ip_network("100.64.0.0/10")
+TRUSTED_PROXIES = [
+    ipaddress.ip_network(n.strip())
+    for n in os.environ.get("TRUSTED_PROXIES", "172.18.0.0/16").split(",") if n.strip()
+]
 
 
 def is_tailscale_ip(ip: str) -> bool:
@@ -163,12 +161,11 @@ def is_tailscale_ip(ip: str) -> bool:
 
 
 def _is_proxy_peer(ip: str) -> bool:
-    """True, если сокет-peer — наш доверенный прокси: приватная сеть Docker
-       (172.16/12, 10/8, 192.168/16) или loopback. Только от такого peer
-       имеет смысл читать X-Real-IP."""
+    """True, если сокет-peer — наш nginx (docker-сеть smart-home_default).
+       Только от такого peer имеет смысл читать X-Real-IP."""
     try:
         addr = ipaddress.ip_address(ip)
-        return addr.is_private or addr.is_loopback
+        return any(addr in net for net in TRUSTED_PROXIES)
     except ValueError:
         return False
 
@@ -1176,8 +1173,18 @@ async def delete_note(note_id: uuid.UUID):
 #  month = 'YYYY-MM'. Бэкенд считает просрочку и копирует список
 #  при наступлении нового месяца.
 # ══════════════════════════════════════════════════════════════
+# 'YYYY-MM' с реальным месяцем 01..12: DB CHECK проверяет только формат, а
+# «2026-13» в finance.credits ломал бы весь модуль (calendar.monthrange → 500)
+MONTH_RE = r"^\d{4}-(0[1-9]|1[0-2])$"
+
+
+def _check_month(month: str) -> None:
+    if not re.fullmatch(MONTH_RE, month):
+        raise HTTPException(400, "Месяц в формате YYYY-MM (01–12)")
+
+
 class CreditIn(BaseModel):
-    month: str
+    month: str = Field(pattern=MONTH_RE)
     name: str
     amount: float = 0
     due_day: int | None = None
@@ -1284,6 +1291,7 @@ async def finance_bootstrap():
 # ── произвольный месяц (прошлое; будущее запрещено) ───────────
 @app.get("/api/finance/month/{month}")
 async def finance_month(month: str):
+    _check_month(month)
     today = Date.today()
     cur = today.strftime("%Y-%m")
     if month > cur:
@@ -1345,8 +1353,8 @@ async def delete_credit(credit_id: uuid.UUID):
 #  Оплаченные кредиты месяца подтягиваются в расход на лету.
 # ══════════════════════════════════════════════════════════════
 class EntryIn(BaseModel):
-    month: str
-    kind: str            # 'in' | 'out'
+    month: str = Field(pattern=MONTH_RE)
+    kind: str           # 'in' | 'out'
     name: str = ""
     amount: float = 0
     due_day: int | None = None
@@ -1381,7 +1389,8 @@ def _check_kind(kind):
 # ── загрузка месяца Д/К: события + сумма оплаченных кредитов ───
 @app.get("/api/finance/dk/{month}")
 async def finance_dk(month: str):
-    cur = Date.today().strftime("%Y-%m")
+    _check_month(month)
+    cur =Date.today().strftime("%Y-%m")
     if month > cur:
         raise HTTPException(400, "Будущие месяцы недоступны")
     async with pool.acquire() as c:
@@ -1779,8 +1788,7 @@ async def budget_import(file: UploadFile = File(...)):
 
 @app.get("/api/budget/month/{month}")
 async def budget_month(month: str):
-    if not re.fullmatch(r"\d{4}-\d{2}", month):
-        raise HTTPException(400, "Месяц в формате YYYY-MM")
+    _check_month(month)
     async with pool.acquire() as c:
         return await budget.month_summary(c, month)
 
