@@ -3814,6 +3814,7 @@ async function loadDK(month, quiet) {
     state.finance.entries = data.entries;
     state.finance.creditsPaid = data.credits_paid;
     state.finance.bankExpense = data.bank_expense || 0;
+    state.finance.bankSalary = data.bank_salary || 0;
   } catch (e) { financeOnline = false; }
   if (quiet) return;             // вызвано из loadFinance — рендер будет снаружи
   closeCreditForm();
@@ -4399,8 +4400,24 @@ function renderDK() {
   const entries = [...state.finance.entries].sort(byDay);
   const cp = state.finance.creditsPaid || 0;
   const be = state.finance.bankExpense || 0;
-  if (!entries.length && !cp && !be) { el.innerHTML = '<div class="empty">Нет приходов и расходов</div>'; updateFinSummary(); return; }
+  const bs = state.finance.bankSalary || 0;
+  if (!entries.length && !cp && !be && !bs) { el.innerHTML = '<div class="empty">Нет приходов и расходов</div>'; updateFinSummary(); return; }
   el.innerHTML = '';
+  // строка-итог: зарплата + премия из справок банка (read-only) → режим «Траты»
+  if (bs > 0) {
+    const row = document.createElement('div');
+    row.className = 'credit-row dk-credits';
+    row.title = 'Открыть «Траты»';
+    row.onclick = () => setFinMode('budget');
+    const sign = document.createElement('div'); sign.className = 'dk-sign in'; sign.textContent = '+';
+    const main = document.createElement('div'); main.className = 'credit-main';
+    main.innerHTML = `<div class="credit-name">Зарплата</div>`;
+    const day = document.createElement('div'); day.className = 'credit-day empty'; day.textContent = '–';
+    const amount = document.createElement('div'); amount.className = 'credit-amount'; amount.textContent = fmtMoney(bs);
+    amount.style.color = 'var(--accent)';
+    row.append(sign, main, day, amount);
+    el.appendChild(row);
+  }
   entries.forEach(en => {
     const row = document.createElement('div');
     row.className = 'credit-row dk-row';
@@ -4469,6 +4486,7 @@ function updateFinSummary() {
   if (financeMode === 'dk') {
     let inc = 0, exp = 0;
     state.finance.entries.forEach(e => { if (e.kind === 'in') inc += e.amount; else exp += e.amount; });
+    inc += state.finance.bankSalary || 0;
     exp += (state.finance.creditsPaid || 0) + (state.finance.bankExpense || 0);
     const bal = inc - exp;
     l1.textContent = 'приход'; l2.textContent = 'расход';

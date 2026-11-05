@@ -1406,11 +1406,20 @@ async def finance_dk(month: str):
         )
         # траты по карте из справок банка (Финансы → Траты), без своих переводов и кредитов
         bank_expense = (await budget.month_summary(c, month))["expense"]
+        # зарплата + премия из справок банка — единственный доход из выписки, идущий в Д/К
+        start, end = budget._month_bounds(month)
+        bank_salary = await c.fetchval(
+            "SELECT COALESCE(sum(amount), 0) FROM budget.ops "
+            "WHERE op_at >= $1 AND op_at < $2 AND amount > 0 "
+            "AND (kind = 'salary' OR description ~* 'преми')",
+            start, end,
+        )
     return {
         "month": month,
         "entries": [to_entry(r) for r in entries],
         "credits_paid": float(credits_paid),
         "bank_expense": bank_expense,
+        "bank_salary": float(bank_salary),
     }
 
 
